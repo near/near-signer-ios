@@ -1,0 +1,23 @@
+# SwiftFormat (github.com/nicklockwood/SwiftFormat). Only layout, whitespace and a few safe
+# clean-ups run, so the code keeps its own idioms. Apply with scripts/format.sh; CI checks it.
+--minversion 0.63.0
+--swiftversion 5.9
+--exclude .build,**/DerivedData,Tests/NearSignerCoreTests/Fixtures.swift
+
+--rules blankLineAfterImports,blankLinesAtEndOfScope,blankLinesAtStartOfScope,blankLinesBetweenImports
+--rules braces,consecutiveBlankLines,duplicateImports,elseOnSameLine,emptyBraces,indent,isEmpty
+--rules leadingDelimiters,linebreakAtEndOfFile,linebreaks,modifierOrder,redundantBreak,redundantInit
+--rules redundantLet,redundantPattern,redundantVoidReturnType,semicolons,sortImports
+--rules spaceAroundBraces,spaceAroundBrackets,spaceAroundComments,spaceAroundGenerics
+--rules spaceAroundOperators,spaceAroundParens,spaceInsideBraces,spaceInsideBrackets
+--rules spaceInsideComments,spaceInsideGenerics,spaceInsideParens,todos,trailingCommas,trailingSpace
+--rules typeSugar,void
+
+--indent 4
+--ifdef no-indent
+--indentcase false
+--indentstrings true
+--guardelse same-line
+--importgrouping testable-last
+--ranges no-space
+--semicolons inline

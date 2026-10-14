@@ -1,0 +1,35 @@
+# Swift Package Manager
+.build/
+.swiftpm/
+# swift-crypto is a dependency on Linux only, so SwiftPM would rewrite this file on every switch
+# between Linux and macOS. CI resolves the newest version Package.swift allows.
+Package.resolved
+
+# Xcode
+xcuserdata/
+*.xcuserstate
+DerivedData/
+build/
+*.xcresult
+*.ipa
+*.dSYM
+*.dSYM.zip
+
+# Signing material never belongs in the repository.
+*.mobileprovision
+*.p12
+*.p8
+*.cer
+
+# Python
+__pycache__/
+*.pyc
+.ruff_cache/
+.venv/
+
+# Node.js (scripts/gen-token-icons.mjs needs @resvg/resvg-js installed next to it)
+node_modules/
+/package.json
+/package-lock.json
+
+.DS_Store

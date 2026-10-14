@@ -1,0 +1,11 @@
+# Ruff (docs.astral.sh/ruff) for the Python host tools and scripts. Apply with scripts/format.sh;
+# CI checks it.
+required-version = ">=0.16"
+line-length = 120
+# The host tool runs on the Python that ships with macOS.
+target-version = "py39"
+
+[lint]
+select = ["E", "F", "W", "I", "B"]
+# The formatter wraps code; what stays longer is strings and URLs.
+ignore = ["E501"]

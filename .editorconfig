@@ -1,0 +1,17 @@
+# Editor defaults (Xcode 16 and later read this file too). Formatting itself is checked by
+# scripts/format.sh.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{json,yml,yaml}]
+indent_size = 2
+
+[*.pbxproj]
+indent_style = tab

@@ -1,0 +1,13 @@
+# Keeps the pinned GitHub Actions current. New releases wait two weeks before an update is
+# proposed, so a compromised release has time to be caught first.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14
+    groups:
+      github-actions:
+        patterns: ["*"]
