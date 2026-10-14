@@ -170,6 +170,8 @@ public keys are decoded and displayed, but the device itself signs with ed25519.
   with a warning. A summary card keeps every warning the raw view would show. Unknown fields in NEAR Intents
   are listed with a warning, and all attached NEAR stays in plain sight. Amounts are never
   truncated, and thousands are grouped with a narrow space, which no locale reads as a decimal point.
+  Account ids, keys and token ids that wrap break at any character: iOS 26 would otherwise hyphenate
+  them and show a "-" they don't have. Copying gives the exact value.
 - **NEAR keys only.** Paths must be 5 hardened levels under `44'/397'`, so a host cannot use the
   seed's keys for other chains.
 - **Key check.** If the transaction's `public_key` is not this device's key at the requested path,
@@ -322,6 +324,12 @@ could lie about a token and its metadata cannot be fetched offline. Every entry 
 against the contract's `ft_metadata` on mainnet. Unknown tokens show their amount in the smallest
 units with a warning. `scripts/gen-token-icons.mjs` renders the icons from the same on-chain
 metadata into the asset catalog.
+
+The list also has USDC and USDT from other chains as NEAR Intents holds them: NEP-141 tokens of
+its own bridge (`eth-0xa0b8…eb48.omft.near` is USDC from Ethereum) and NEP-245 tokens of HOT
+Bridge (`nep245:v2_1.omni.hot.tg:…`), listed by their full id. They come from the NEAR Intents
+app's token list, were checked against `ft_metadata` or `mt_metadata_base_by_token_id`, and use
+the USDC and USDT icons. The card names the chain ("USD Coin (Ethereum)").
 
 ## Signing history
 

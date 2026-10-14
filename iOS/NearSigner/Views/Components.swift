@@ -110,7 +110,7 @@ struct SectionCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(section.title.trimmingCharacters(in: .whitespaces))
+            DataText(section.title.trimmingCharacters(in: .whitespaces))
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
             ForEach(Array(section.fields.enumerated()), id: \.offset) { index, field in
@@ -134,18 +134,18 @@ struct DisplayFieldView: View {
                 .foregroundStyle(.secondary)
             switch field.style {
             case .text:
-                Text(field.value)
+                DataText(field.value)
                     .valueMenu(field.value, title: field.label)
             case .monospace:
-                Text(field.value)
+                DataText(field.value)
                     .font(.callout.monospaced())
                     .valueMenu(field.value, title: field.label)
             case .amount:
-                Text(field.value)
+                DataText(field.value)
                     .font(.title3.weight(.semibold))
                     .valueMenu(field.value, title: field.label)
             case .warning:
-                Text(field.value)
+                DataText(field.value)
                     .font(.body.weight(.bold))
                     .foregroundStyle(.red)
             case .code:
@@ -169,7 +169,7 @@ struct WarningCard: View {
 
     var body: some View {
         Label {
-            Text(text).fixedSize(horizontal: false, vertical: true)
+            DataText(text).fixedSize(horizontal: false, vertical: true)
         } icon: {
             Image(systemName: "exclamationmark.triangle.fill")
         }
@@ -341,6 +341,19 @@ struct AccountAvatar: View {
 
 // MARK: - Utilities
 
+/// Request and account data. An id that wraps breaks at any character, without the hyphen iOS
+/// would otherwise add (see `NearFormat.wrappingIDs`). VoiceOver reads the original text.
+struct DataText: View {
+    let text: String
+
+    init(_ text: String) { self.text = text }
+
+    var body: some View {
+        Text(verbatim: NearFormat.wrappingIDs(text))
+            .accessibilityLabel(text)
+    }
+}
+
 struct CopyButton: View {
     let value: String
     var label = "Copy"
@@ -409,7 +422,7 @@ struct QRCodeSheet: View {
                     Text("Scan with another device's camera.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
-                    Text(value)
+                    DataText(value)
                         .font(.footnote.monospaced())
                         .multilineTextAlignment(.center)
                         .lineLimit(12)

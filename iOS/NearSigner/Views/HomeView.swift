@@ -280,12 +280,12 @@ struct LastResultRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(headline)
                     .font(.subheadline.weight(.semibold))
-                Text(record.title)
+                DataText(record.title)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
                 if record.outcome == .failed, let reason = record.failureReason {
-                    Text(reason)
+                    DataText(reason)
                         .font(.footnote)
                         .foregroundStyle(.red)
                         .lineLimit(3)

@@ -252,6 +252,19 @@ final class AppsTests: XCTestCase {
         XCTAssertNil(plain.highlight)
     }
 
+    /// Stablecoins from other chains, as NEAR Intents holds them (NEP-141 and NEP-245).
+    func testBridgedStablecoinsInIntents() {
+        let fromEthereum = TokenAmount(raw: U128(990_985), tokenId: "nep141:eth-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.omft.near")
+        XCTAssertEqual(fromEthereum.text, "0.990985 USDC")
+        // HOT Bridge's BNB Chain USDC has 18 decimals.
+        let fromBNB = TokenAmount(raw: U128(decimal: "2500000000000000000")!, tokenId: "nep245:v2_1.omni.hot.tg:56_2w93GqMcEmQFDru84j3HZZWt557r")
+        XCTAssertEqual(fromBNB.text, "2.5 USDC")
+        XCTAssertEqual(fromBNB.token?.name, "USD Coin (BNB Chain)")
+        XCTAssertFalse(TokenAmount(raw: U128(1), tokenId: "nep245:v2_1.omni.hot.tg:56_unknown").isKnown)
+        // Every listed token can be told apart by its contract.
+        XCTAssertEqual(Set(TokenRegistry.tokens.map(\.contract)).count, TokenRegistry.tokens.count)
+    }
+
     func testIntentsOnFAR() throws {
         func sign(_ message: String) throws -> RequestDisplay {
             let payload = NEP413Payload(message: message, nonce: Data(repeating: 2, count: 32), recipient: "intents.far", callbackUrl: nil)
@@ -292,6 +305,17 @@ final class AppsTests: XCTestCase {
             """)
         XCTAssertEqual(try move(odd).amount.text, "5 units of imt:\(issuer):points")
         XCTAssertNil(TokenAmount(raw: U128(1), tokenId: "imt::nep141:wrap.near").token, "an issuer is required")
+
+        // USDC from Ethereum, as the FAR app sent it.
+        let usdc = try sign("""
+            {"deadline":"2026-10-16T09:28:19.922Z","intents":[{"intent":"transfer",\
+            "receiver_id":"ce865dc731f208abefbf0f964aa73d015913d2e9af6f722aaf3f40d5ef55e026",\
+            "tokens":{"imt:\(issuer):nep141:eth-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.omft.near":"990985"}}],\
+            "signer_id":"frol.near"}
+            """)
+        XCTAssertEqual(usdc.title, "Send 0.990985 USDC to ce865d…55e026")
+        XCTAssertEqual(try move(usdc).amount.token?.name, "USD Coin (Ethereum)")
+        XCTAssertTrue(usdc.warnings.isEmpty)
 
         // On-chain calls to the FAR contract are recognized too.
         let withdraw = try display(receiver: "intents.far", [call("ft_withdraw", #"{"token":"usdt.tether-token.near","receiver_id":"alice.near","amount":"2500000"}"#)])

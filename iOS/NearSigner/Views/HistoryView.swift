@@ -117,7 +117,7 @@ private struct HistoryRow: View {
                         tint: record.outcome == .approved ? .accentColor : .secondary,
                         size: 38)
             VStack(alignment: .leading, spacing: 2) {
-                Text(record.title)
+                DataText(record.title)
                     .font(.subheadline.weight(.medium))
                     .lineLimit(2)
                 Text(subtitle)
@@ -149,7 +149,7 @@ struct HistoryDetailView: View {
             Section {
                 VStack(spacing: 10) {
                     SymbolBadge(symbol: record.displaySymbol, size: 56)
-                    Text(record.title)
+                    DataText(record.title)
                         .font(.title3.bold())
                         .multilineTextAlignment(.center)
                     OutcomeBadge(record: record)
@@ -178,7 +178,7 @@ struct HistoryDetailView: View {
 
             if let reason = record.failureReason {
                 Section("What Happened") {
-                    Text(reason).foregroundStyle(record.outcome == .failed ? Color.red : Color.secondary)
+                    DataText(reason).foregroundStyle(record.outcome == .failed ? Color.red : Color.secondary)
                 }
             }
 
@@ -294,7 +294,7 @@ private struct TechnicalValue: View {
             Text(label)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            Text(value)
+            DataText(value)
                 .font(.footnote.monospaced())
                 .lineLimit(8)
         }
@@ -317,7 +317,7 @@ private struct RawPayloadRow: View {
             Text("Raw request (Borsh, base64), \(NearFormat.byteSize(payload.count))")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            Text(payload.prefix(RawPayloadRow.previewBytes).base64EncodedString()
+            DataText(payload.prefix(RawPayloadRow.previewBytes).base64EncodedString()
                 + (payload.count > RawPayloadRow.previewBytes ? "…" : ""))
                 .font(.footnote.monospaced())
                 .lineLimit(6)

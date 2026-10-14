@@ -2,7 +2,8 @@ import Foundation
 
 /// A fungible token whose symbol and decimals are known offline.
 public struct Token: Equatable, Sendable {
-    /// Token contract, or "" for native NEAR.
+    /// Token contract, "" for native NEAR, or the full id of a NEAR Intents NEP-245 token
+    /// (`nep245:<contract>:<token id>`).
     public let contract: String
     public let symbol: String
     public let name: String
@@ -46,6 +47,40 @@ public enum TokenRegistry {
         Token(contract: "zec.omft.near", symbol: "ZEC", name: "Zcash", decimals: 8, icon: "token-zec"),
         Token(contract: "xrp.omft.near", symbol: "XRP", name: "XRP", decimals: 6, icon: "token-xrp"),
         Token(contract: "doge.omft.near", symbol: "DOGE", name: "Dogecoin", decimals: 8, icon: nil),
+        // USDC and USDT from other chains, as NEAR Intents holds them: NEP-141 tokens of its own
+        // bridge (`*.omft.near`) and NEP-245 tokens of HOT Bridge (`v2_1.omni.hot.tg`). Taken from
+        // the NEAR Intents app's token list; symbols and decimals checked against `ft_metadata` and
+        // `mt_metadata_base_by_token_id`. The BNB Chain ones have 18 decimals.
+        Token(contract: "eth-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.omft.near", symbol: "USDC", name: "USD Coin (Ethereum)", decimals: 6, icon: "token-usdc"),
+        Token(contract: "base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near", symbol: "USDC", name: "USD Coin (Base)", decimals: 6, icon: "token-usdc"),
+        Token(contract: "arb-0xaf88d065e77c8cc2239327c5edb3a432268e5831.omft.near", symbol: "USDC", name: "USD Coin (Arbitrum)", decimals: 6, icon: "token-usdc"),
+        Token(contract: "sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near", symbol: "USDC", name: "USD Coin (Solana)", decimals: 6, icon: "token-usdc"),
+        Token(contract: "gnosis-0x2a22f9c3b484c3629090feed35f17ff8f88f76f0.omft.near", symbol: "USDC", name: "USD Coin (Gnosis)", decimals: 6, icon: "token-usdc"),
+        Token(contract: "nep245:v2_1.omni.hot.tg:137_qiStmoQJDQPTebaPjgx5VBxZv6L", symbol: "USDC", name: "USD Coin (Polygon)", decimals: 6, icon: "token-usdc"),
+        Token(contract: "nep245:v2_1.omni.hot.tg:56_2w93GqMcEmQFDru84j3HZZWt557r", symbol: "USDC", name: "USD Coin (BNB Chain)", decimals: 18, icon: "token-usdc"),
+        Token(contract: "sui-c1b81ecaf27933252d31a963bc5e9458f13c18ce.omft.near", symbol: "USDC", name: "USD Coin (Sui)", decimals: 6, icon: "token-usdc"),
+        Token(contract: "nep245:v2_1.omni.hot.tg:1100_111bzQBB65GxAPAVoxqmMcgYo5oS3txhqs1Uh1cgahKQUeTUq1TJu", symbol: "USDC", name: "USD Coin (Stellar)", decimals: 7, icon: "token-usdc"),
+        Token(contract: "nep245:v2_1.omni.hot.tg:10_A2ewyUyDp6qsue1jqZsGypkCxRJ", symbol: "USDC", name: "USD Coin (Optimism)", decimals: 6, icon: "token-usdc"),
+        Token(contract: "nep245:v2_1.omni.hot.tg:43114_3atVJH3r5c4GqiSYmg9fECvjc47o", symbol: "USDC", name: "USD Coin (Avalanche)", decimals: 6, icon: "token-usdc"),
+        Token(contract: "nep245:v2_1.omni.hot.tg:196_2dK9kLNR7Ekq7su8FxNGiUW3djTw", symbol: "USDC", name: "USD Coin (X Layer)", decimals: 6, icon: "token-usdc"),
+        Token(contract: "nep245:v2_1.omni.hot.tg:143_2dmLwYWkCQKyTjeUPAsGJuiVLbFx", symbol: "USDC", name: "USD Coin (Monad)", decimals: 6, icon: "token-usdc"),
+        Token(contract: "aptos-34ee497f210c5a511e8d5b53bc56d75b63612bb5.omft.near", symbol: "USDC", name: "USD Coin (Aptos)", decimals: 6, icon: "token-usdc"),
+        Token(contract: "eth-0xdac17f958d2ee523a2206206994597c13d831ec7.omft.near", symbol: "USDT", name: "Tether USD (Ethereum)", decimals: 6, icon: "token-usdt"),
+        Token(contract: "arb-0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9.omft.near", symbol: "USDT", name: "Tether USD (Arbitrum)", decimals: 6, icon: "token-usdt"),
+        Token(contract: "sol-c800a4bd850783ccb82c2b2c7e84175443606352.omft.near", symbol: "USDT", name: "Tether USD (Solana)", decimals: 6, icon: "token-usdt"),
+        Token(contract: "tron-d28a265909efecdcee7c5028585214ea0b96f015.omft.near", symbol: "USDT", name: "Tether USD (Tron)", decimals: 6, icon: "token-usdt"),
+        Token(contract: "nep245:v2_1.omni.hot.tg:137_3hpYoaLtt8MP1Z2GH1U473DMRKgr", symbol: "USDT", name: "Tether USD (Polygon)", decimals: 6, icon: "token-usdt"),
+        Token(contract: "nep245:v2_1.omni.hot.tg:56_2CMMyVTGZkeyNZTSvS5sarzfir6g", symbol: "USDT", name: "Tether USD (BNB Chain)", decimals: 18, icon: "token-usdt"),
+        Token(contract: "nep245:v2_1.omni.hot.tg:1117_3tsdfyziyc7EJbP2aULWSKU4toBaAcN4FdTgfm5W1mC4ouR", symbol: "USDT", name: "Tether USD (TON)", decimals: 6, icon: "token-usdt"),
+        Token(contract: "nep245:v2_1.omni.hot.tg:43114_372BeH7ENZieCaabwkbWkBiTTgXp", symbol: "USDT", name: "Tether USD (Avalanche)", decimals: 6, icon: "token-usdt"),
+        Token(contract: "nep245:v2_1.omni.hot.tg:10_359RPSJVdTxwTJT9TyGssr2rFoWo", symbol: "USDT", name: "Tether USD (Optimism)", decimals: 6, icon: "token-usdt"),
+        Token(contract: "aptos-88cb7619440a914fe6400149a12b443c3ac21d59.omft.near", symbol: "USDT", name: "Tether USD (Aptos)", decimals: 6, icon: "token-usdt"),
+        Token(contract: "bera-0x779ded0c9e1022225f8e0630b35a9b54be713736.omft.near", symbol: "USDT0", name: "USDT0 (Berachain)", decimals: 6, icon: "token-usdt"),
+        Token(contract: "nep245:v2_1.omni.hot.tg:196_2fezDCvVYRsG8wrK6deJ2VRPiAS1", symbol: "USDT0", name: "USDT0 (X Layer)", decimals: 6, icon: "token-usdt"),
+        Token(contract: "nep245:v2_1.omni.hot.tg:143_4EJiJxSALvGoTZbnc8K7Ft9533et", symbol: "USDT", name: "Tether USD (Monad)", decimals: 6, icon: "token-usdt"),
+        Token(contract: "nep245:v2_1.omni.hot.tg:9745_3aL9skCy1yhPoDB8oKMmRHRN7SJW", symbol: "USDT", name: "Tether USD (Plasma)", decimals: 6, icon: "token-usdt"),
+        Token(contract: "plasma-0xb8ce59fc3717ada4c02eadf9682a9e934f625ebb.omft.near", symbol: "USDT", name: "Tether USD (Plasma)", decimals: 6, icon: "token-usdt"),
+        Token(contract: "gnosis-0x4ecaba5870353805a9f068101a40e0f32ed605c6.omft.near", symbol: "USDT", name: "Tether USD (Gnosis)", decimals: 6, icon: "token-usdt"),
         Token(contract: "wrap.testnet", symbol: "wNEAR", name: "Wrapped NEAR (testnet)", decimals: 24, icon: "token-near"),
     ]
 
@@ -96,7 +131,7 @@ public struct TokenAmount: Equatable, Sendable {
             return internalToken.name.hasPrefix("imt:") ? nil : knownToken(for: internalToken.name)
         }
         if tokenId.hasPrefix("nep141:") { return TokenRegistry.token(contract: String(tokenId.dropFirst(7))) }
-        if tokenId.contains(":") { return nil }
+        // A plain contract, or a NEP-245 token listed under its full id.
         return TokenRegistry.token(contract: tokenId)
     }
 

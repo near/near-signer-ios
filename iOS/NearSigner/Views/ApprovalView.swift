@@ -65,7 +65,7 @@ struct ApprovalView: View {
     private var header: some View {
         VStack(spacing: 12) {
             SymbolBadge(symbol: request.display.symbol, size: 64)
-            Text(headline)
+            DataText(headline)
                 .font(.title2.bold())
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
@@ -84,15 +84,15 @@ struct ApprovalView: View {
                 Text(accountCaption)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text(accountName)
+                DataText(accountName)
                     .font(.headline)
                 if let signerId = request.signerId {
-                    Text(signerId)
+                    DataText(signerId)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 } else if let account {
-                    Text(account.shortDisplayAddress)
+                    DataText(account.shortDisplayAddress)
                         .font(account.accountId == nil ? .footnote.monospaced() : .footnote)
                         .foregroundStyle(.secondary)
                 }

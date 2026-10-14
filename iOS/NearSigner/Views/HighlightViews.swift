@@ -64,7 +64,7 @@ struct TokenAmountText: View {
                 Text(amount.raw.description)
                     .font(.system(size: size * 0.7, weight: .bold, design: .rounded))
                     .fixedSize(horizontal: false, vertical: true)
-                Text("units of \(amount.symbol)")
+                DataText("units of \(amount.symbol)")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -84,7 +84,7 @@ struct TokenIssuerText: View {
 
     var body: some View {
         if amount.hasUntrustedIssuer, let issuer = amount.issuer {
-            Text("Issued by \(issuer)")
+            DataText("Issued by \(issuer)")
                 .font(.caption.monospaced())
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(alignment)
@@ -104,7 +104,7 @@ private struct CardRow: View {
             Text(label)
                 .foregroundStyle(.secondary)
             Spacer(minLength: 12)
-            Text(value)
+            DataText(value)
                 .font(monospaced ? .callout.monospaced() : .callout.weight(.medium))
                 .multilineTextAlignment(.trailing)
                 .valueMenu(value, title: label)
@@ -242,7 +242,7 @@ struct RecipientView: View {
                     .background(color.gradient, in: Circle())
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(accountId)
+                    DataText(accountId)
                         .font(isImplicit ? .callout.monospaced().weight(.medium) : .title3.weight(.semibold))
                         .fixedSize(horizontal: false, vertical: true)
                         .valueMenu(accountId, title: label)
@@ -338,7 +338,7 @@ struct DAOCard: View {
                     Text("DAO")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text(action.dao)
+                    DataText(action.dao)
                         .font(.callout.monospaced())
                         .fixedSize(horizontal: false, vertical: true)
                         .valueMenu(action.dao, title: "DAO")
@@ -350,13 +350,13 @@ struct DAOCard: View {
                 Text("New proposal")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                Text(summary)
+                DataText(summary)
                     .font(.title3.bold())
                     .fixedSize(horizontal: false, vertical: true)
                 ProposalDetails(sections: action.details)
                 // What the proposal does comes first; the free-text description is all in Details.
                 if !description.isEmpty {
-                    Text(description)
+                    DataText(description)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .lineLimit(4)
@@ -391,7 +391,7 @@ private struct WebsiteClaim: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(summary)
+                DataText(summary)
                     .font(.callout.weight(.semibold))
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
@@ -425,7 +425,7 @@ private struct ProposalDetails: View {
             VStack(alignment: .leading, spacing: 10) {
                 let title = section.title.trimmingCharacters(in: .whitespaces)
                 if !title.isEmpty {
-                    Text(title)
+                    DataText(title)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                 }

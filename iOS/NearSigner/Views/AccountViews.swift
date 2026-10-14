@@ -86,10 +86,11 @@ private struct AccountDetailContent: View {
                     .pickerStyle(.segmented)
                     QRCodeView(value: value)
                         .frame(maxWidth: 220)
-                    Text(value)
+                    // Copy and Share below give the exact value; selecting this text would also
+                    // copy the invisible line-break points.
+                    DataText(value)
                         .font(selected == .name ? .body.weight(.semibold) : .footnote.monospaced())
                         .multilineTextAlignment(.center)
-                        .textSelection(.enabled)
                     HStack(spacing: 12) {
                         CopyButton(value: value)
                             .buttonStyle(.bordered)
@@ -113,7 +114,7 @@ private struct AccountDetailContent: View {
                     editingAccountId = true
                 } label: {
                     LabeledContent {
-                        Text(account.accountId ?? "Not set")
+                        DataText(account.accountId ?? "Not set")
                             .foregroundStyle(account.accountId == nil ? Color.secondary : Color.primary)
                     } label: {
                         Label("NEAR account name", systemImage: "at")

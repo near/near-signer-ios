@@ -125,6 +125,26 @@ final class AuditRegressionTests: XCTestCase {
         XCTAssertEqual(NearFormat.visible("zero\u{200B}width"), "zero\\u{200B}width")
     }
 
+    /// Ids may break anywhere when they wrap, so iOS never adds a hyphen they don't have.
+    func testIdsWrapWithoutHyphens() {
+        let zwsp = "\u{200B}"
+        func plain(_ text: String) -> String { text.replacingOccurrences(of: zwsp, with: "") }
+        let warning = "imt:51e8f94d:nep141:eth-0xa0b8.omft.near is not in NEAR Signer's token list. Check bob.near."
+        let wrapped = NearFormat.wrappingIDs(warning)
+        XCTAssertEqual(plain(wrapped), warning, "nothing visible changes")
+        XCTAssertTrue(wrapped.hasPrefix("i\(zwsp)m\(zwsp)t\(zwsp):"))
+        // Ordinary words stay whole; punctuation after an id stays attached to it.
+        XCTAssertTrue(wrapped.contains(" is not in NEAR Signer's token list. Check "))
+        XCTAssertTrue(wrapped.hasSuffix("b\(zwsp)o\(zwsp)b\(zwsp).\(zwsp)n\(zwsp)e\(zwsp)a\(zwsp)r."))
+        // Implicit ids, shortened ids and keys break anywhere; amounts and dates without letters don't change.
+        let implicit = String(repeating: "ab", count: 32)
+        XCTAssertEqual(NearFormat.wrappingIDs(implicit).count, 127)
+        XCTAssertEqual(NearFormat.wrappingIDs("Send 1 234.5 USDC to 5bb0a9…8123ca"),
+                       "Send 1 234.5 USDC to 5\(zwsp)b\(zwsp)b\(zwsp)0\(zwsp)a\(zwsp)9\(zwsp)…\(zwsp)8\(zwsp)1\(zwsp)2\(zwsp)3\(zwsp)c\(zwsp)a")
+        XCTAssertEqual(NearFormat.wrappingIDs("(alice)"), "(alice)")
+        XCTAssertEqual(NearFormat.wrappingIDs(""), "")
+    }
+
     func testLongArgumentsNameEveryField() throws {
         let memo = String(repeating: "x", count: 20_000)
         let display = try display(receiver: "app.near", [call("act", #"{"memo":"\#(memo)","receiver_id":"attacker.near"}"#, deposit: .zero)])

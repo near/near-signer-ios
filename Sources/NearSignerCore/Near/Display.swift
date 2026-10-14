@@ -236,6 +236,46 @@ public enum NearFormat {
         accountKind(accountId) == nil ? accountId : "\(accountId.prefix(6))…\(accountId.suffix(6))"
     }
 
+    /// For display only; copy and share the original text. iOS 26 hyphenates a word that doesn't
+    /// fit at the end of a line, so an account id, key or token id could show a "-" it doesn't
+    /// have. This puts a zero-width space between the characters of every word that looks like an
+    /// id (letters with digits or `.:_/@`, or 20 characters long), so the line can break anywhere
+    /// in it and never needs a hyphen. Other words, and punctuation around an id, are left alone.
+    public static func wrappingIDs(_ text: String) -> String {
+        var result = ""
+        var word: [Character] = []
+        func flush() {
+            result += breakable(word)
+            word.removeAll()
+        }
+        for character in text {
+            if character.isWhitespace {
+                flush()
+                result.append(character)
+            } else {
+                word.append(character)
+            }
+        }
+        flush()
+        return result
+    }
+
+    private static let leadingMarks: Set<Character> = ["(", "[", "\"", "'", "“", "‘"]
+    private static let trailingMarks: Set<Character> = [".", ",", ";", ":", "!", "?", ")", "]", "\"", "'", "”", "’"]
+
+    private static func breakable(_ word: [Character]) -> String {
+        var start = 0
+        var end = word.count
+        while start < end, leadingMarks.contains(word[start]) { start += 1 }
+        while end > start, trailingMarks.contains(word[end - 1]) { end -= 1 }
+        let core = word[start..<end]
+        guard core.contains(where: \.isLetter),
+              core.count >= 20 || core.contains(where: { $0.isNumber || ".:_/@".contains($0) }) else {
+            return String(word)
+        }
+        return String(word[..<start]) + core.map(String.init).joined(separator: "\u{200B}") + String(word[end...])
+    }
+
     /// A function call's attached deposit. Real amounts show large; the 1 yoctoNEAR contracts ask
     /// as a confirmation doesn't.
     static func depositField(_ deposit: U128) -> DisplayField {
