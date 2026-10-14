@@ -106,12 +106,18 @@ near-ledger-rs and near-connect:
 | `80 02` | sign transaction | path ‖ `borsh(Transaction)`, 250-byte chunks, P1 `80` on the last → 64-byte signature |
 | `80 07` | sign NEP-413 message | path ‖ `borsh(Payload)` (without the 2³¹+413 tag) |
 | `80 08` | sign NEP-366 delegate action | path ‖ `borsh(DelegateAction)` (without the 2³⁰+366 prefix) |
-| `B0 01`, `E0 D8`, `B0 A7` | BOLOS get app name / open app / quit app | the "NEAR" app is always open |
+| `B0 01`, `E0 D8`, `B0 A7` | BOLOS get app name / open app / quit app | reports "NEAR"; after quit app, "BOLOS" (the dashboard) until open app or the next `80` command |
+| `E0 01` | BOLOS firmware details | on the dashboard `6A81`, and NEAR is open again; inside NEAR `6E00`, as on a Ledger |
 | `80 20` | NEAR Signer only: fast-mode capabilities | → `"NS"`, version, flags, max chunk (u32 BE); a Ledger answers `6D00` |
 
 Status words: `9000` OK, `6985` rejected by the user, `B005` payload could not be decoded
 (refused), `B00B` bad path, `B00D` the transaction's key is not this device's key at that path,
-`5515` no key, `6601` busy.
+`5515` no key, `6601` busy, `6A81` no firmware details.
+
+Ledger Live's device manager (My Ledger, also opened right after adding a device) cannot work with
+NEAR Signer: it needs firmware details and Ledger's genuine-device check. It sends quit app until it
+sees the dashboard, then asks for firmware details; the `6A81` answer ends it with an error instead
+of a spinner that never stops. Adding NEAR accounts and signing in Ledger Live don't use it.
 
 **Fast mode**: the Ledger protocol sends 250-byte chunks and waits for a reply to each, which makes
 a 1 MB deployment take minutes over Bluetooth. Hosts that get an answer to `80 20` may send signing
@@ -188,7 +194,8 @@ public keys are decoded and displayed, but the device itself signs with ed25519.
   while the app is in the foreground. Going to the background stops it and rejects any pending
   prompt. Cancelling Face ID counts as a rejection. Only computers that subscribed to
   notifications get a connection, each labelled on screen ("Bluetooth · 3F2A"). The Approve
-  button ignores taps for a second after a request appears.
+  button ignores taps for a second after a request appears. Sharing an account the phone already
+  has takes only that tap, because its public key is stored; its Share button has no Face ID symbol.
 - **Face ID for anything destructive.** Removing or restoring wallets, turning off pairing or
   turning on automatic address sharing needs Face ID or the passcode. **Strict Face ID**
   (Settings › Advanced) removes the passcode fallback for signing and for weakening settings, so

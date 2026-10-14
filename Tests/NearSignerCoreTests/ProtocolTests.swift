@@ -55,6 +55,7 @@ final class ProtocolTests: XCTestCase {
             XCTAssertTrue(key.publicKey.isValidSignature(signature, for: hash))
             XCTAssertEqual(presenter.shownCount, 1)
             XCTAssertEqual(presenter.shown.first?.display.title, "Send usdc.testnet tokens to bob.testnet")
+            XCTAssertEqual(presenter.shown.first?.needsUnlock, true)
 
             let records = await history.all()
             XCTAssertEqual(records.count, 1)
@@ -151,6 +152,8 @@ final class ProtocolTests: XCTestCase {
         let second = await session.handle(NearAPDU.getPublicKey(path: .ledgerDefault, display: false).serialized)
         XCTAssertEqual(second, first)
         XCTAssertEqual(presenter.shownCount, 2)
+        // Only the first one unlocks the key; the approval screen shows Face ID for that one only.
+        XCTAssertEqual(presenter.shown.map(\.needsUnlock), [true, false])
         let third = await session.handle(NearAPDU.getPublicKey(path: .ledgerDefault, display: true).serialized)
         XCTAssertEqual(third, first)
         XCTAssertEqual(presenter.shownCount, 3)
@@ -178,6 +181,49 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(other, StatusWord.userRejected.bytes)
         let outcomes = await history.all().map(\.outcome)
         XCTAssertEqual(outcomes, [.rejected, .approved])
+    }
+
+    /// "Quit app" shows the dashboard, so hosts that wait for it stop repeating the command.
+    func testQuitAppShowsTheDashboard() async throws {
+        let (session, _, _) = try makeSession(answers: [])
+        func appName() async -> String? {
+            let response = await session.handle(APDUCommand(cla: 0xB0, ins: 0x01, p1: 0, p2: 0).serialized)
+            guard response.suffix(2) == StatusWord.ok.bytes, response.count > 2 else { return nil }
+            return String(data: response.dropFirst(2).prefix(Int(response[1])), encoding: .ascii)
+        }
+        let quit = APDUCommand(cla: 0xB0, ins: 0xA7, p1: 0, p2: 0).serialized
+        let firmware = APDUCommand(cla: 0xE0, ins: 0x01, p1: 0, p2: 0).serialized
+
+        // Inside NEAR, firmware details are refused as by the NEAR Ledger app.
+        let inApp = await session.handle(firmware)
+        XCTAssertEqual(inApp, StatusWord.claNotSupported.bytes)
+
+        // Ledger Live's device manager: quit until the dashboard shows, then ask for firmware
+        // details. The error ends it, and NEAR is open again.
+        var name = await appName()
+        XCTAssertEqual(name, "NEAR")
+        var answer = await session.handle(quit)
+        XCTAssertEqual(answer, StatusWord.ok.bytes)
+        name = await appName()
+        XCTAssertEqual(name, "BOLOS")
+        answer = await session.handle(firmware)
+        XCTAssertEqual(answer, StatusWord.functionNotSupported.bytes)
+        name = await appName()
+        XCTAssertEqual(name, "NEAR")
+
+        // near-connect and near-ledger-rs open NEAR from the dashboard.
+        _ = await session.handle(quit)
+        answer = await session.handle(APDUCommand(cla: 0xE0, ins: 0xD8, p1: 0, p2: 0, data: Data("NEAR".utf8)).serialized)
+        XCTAssertEqual(answer, StatusWord.ok.bytes)
+        name = await appName()
+        XCTAssertEqual(name, "NEAR")
+
+        // A NEAR command works on the dashboard too, and opens NEAR.
+        _ = await session.handle(quit)
+        let version = await session.handle(NearAPDU.getVersion().serialized)
+        XCTAssertEqual(version, Data([2, 4, 3]) + StatusWord.ok.bytes)
+        name = await appName()
+        XCTAssertEqual(name, "NEAR")
     }
 
     func testErrorsForBadCommands() async throws {

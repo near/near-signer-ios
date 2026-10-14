@@ -103,9 +103,12 @@ public struct ApprovalRequest: Identifiable, Sendable {
     /// The ed25519 key the payload says must sign it, if it names one.
     public var publicKey: Data?
     public var receivedAt: Date
+    /// Approving unlocks the key, with Face ID or the passcode. Sharing an account the phone
+    /// already knows does not: its public key is stored.
+    public var needsUnlock: Bool
 
     public init(id: UUID = UUID(), kind: Kind, path: BIP32Path, transport: String, display: RequestDisplay,
-                signerId: String? = nil, publicKey: Data? = nil, receivedAt: Date = Date()) {
+                signerId: String? = nil, publicKey: Data? = nil, receivedAt: Date = Date(), needsUnlock: Bool = true) {
         self.id = id
         self.kind = kind
         self.path = path
@@ -114,6 +117,7 @@ public struct ApprovalRequest: Identifiable, Sendable {
         self.signerId = signerId
         self.publicKey = publicKey
         self.receivedAt = receivedAt
+        self.needsUnlock = needsUnlock
     }
 }
 
@@ -222,7 +226,8 @@ public actor SignerService {
         let request = ApprovalRequest(
             kind: .publicKey, path: path, transport: transport,
             display: RequestRenderer.render(publicKeyRequest: path,
-                                            publicKey: cached.map { PublicKey.ed25519($0).description }))
+                                            publicKey: cached.map { PublicKey.ed25519($0).description }),
+            needsUnlock: cached == nil)
         onEvent?(.requestStarted(request))
         let approved = await presenter.requestApproval(request)
         guard approved, !Task.isCancelled else {

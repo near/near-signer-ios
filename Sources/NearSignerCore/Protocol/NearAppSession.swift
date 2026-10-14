@@ -8,6 +8,10 @@ public actor NearAppSession {
     /// False makes the session answer the capability command like a Ledger (for host tests).
     private let offersFastMode: Bool
 
+    /// Set by "quit app": a Ledger then shows its dashboard. Opening NEAR or sending it a command
+    /// clears it.
+    private var onDashboard = false
+
     private var pendingIns: UInt8?
     private var pendingData = Data()
     // Progress of the request being received.
@@ -57,17 +61,31 @@ public actor NearAppSession {
     }
 
     private func dispatch(_ command: APDUCommand) async throws -> Data {
+        if command.cla == NearAPDU.cla { onDashboard = false }
         switch (command.cla, command.ins) {
         case (NearAPDU.claDashboard, NearAPDU.insGetAppName):
             // BOLOS "get app and version": format, name, version, flags.
-            let name = Data("NEAR".utf8)
+            let name = Data((onDashboard ? "BOLOS" : "NEAR").utf8)
             let version = Data(NearAPDU.reportedAppVersion.map(String.init).joined(separator: ".").utf8)
             return Data([1, UInt8(name.count)]) + name + Data([UInt8(version.count)]) + version + Data([1, 0])
 
-        case (NearAPDU.claDashboard, NearAPDU.insQuitApp), (NearAPDU.claOpenApp, NearAPDU.insOpenApp):
-            // The NEAR "app" is always open.
+        case (NearAPDU.claDashboard, NearAPDU.insQuitApp):
+            // Hosts that need the dashboard repeat "quit app" until they see it, without limit.
             reset()
+            onDashboard = true
             return Data()
+
+        case (NearAPDU.claOpenApp, NearAPDU.insOpenApp):
+            reset()
+            onDashboard = false
+            return Data()
+
+        case (NearAPDU.claOpenApp, NearAPDU.insGetFirmwareVersion) where onDashboard:
+            // There is no firmware to describe. Ledger Live's device manager ends on this error
+            // (6E00 would make it ask to quit the app), and NEAR is open again for the next request.
+            reset()
+            onDashboard = false
+            throw StatusWord.functionNotSupported
 
         case (NearAPDU.cla, NearAPDU.insGetVersion):
             reset()

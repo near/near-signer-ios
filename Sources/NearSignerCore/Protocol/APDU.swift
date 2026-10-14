@@ -56,6 +56,7 @@ public enum StatusWord: UInt16, Error, Sendable, CustomStringConvertible {
     case insNotSupported = 0x6D00
     case claNotSupported = 0x6E00
     case invalidData = 0x6A80
+    case functionNotSupported = 0x6A81
     /// No key configured or the key could not be unlocked (BOLOS "locked device").
     case locked = 0x5515
     case parseFailed = 0xB005
@@ -74,6 +75,7 @@ public enum StatusWord: UInt16, Error, Sendable, CustomStringConvertible {
         case .insNotSupported: return "instruction not supported"
         case .claNotSupported: return "class not supported"
         case .invalidData: return "invalid data"
+        case .functionNotSupported: return "function not supported"
         case .locked: return "signer locked or no key"
         case .parseFailed: return "could not decode payload"
         case .badPath: return "unsupported derivation path"
@@ -106,6 +108,8 @@ public enum NearAPDU {
     public static let insQuitApp: UInt8 = 0xA7
     public static let claOpenApp: UInt8 = 0xE0
     public static let insOpenApp: UInt8 = 0xD8
+    /// Firmware details, which Ledger Live's device manager asks for on the dashboard.
+    public static let insGetFirmwareVersion: UInt8 = 0x01
 
     /// The NEAR Ledger app requires exactly 5 path components (20 bytes).
     public static let pathLength = 20

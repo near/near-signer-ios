@@ -125,8 +125,15 @@ struct ApprovalView: View {
             Button {
                 model.resolve(request.id, approved: true)
             } label: {
-                Label(request.kind == .publicKey ? "Share" : "Approve", systemImage: SecureKeyVault.biometrySymbol)
-                    .frame(maxWidth: .infinity)
+                // The Face ID symbol only when Face ID (or the passcode) follows.
+                Group {
+                    if request.needsUnlock {
+                        Label(approveTitle, systemImage: SecureKeyVault.biometrySymbol)
+                    } else {
+                        Text(approveTitle)
+                    }
+                }
+                .frame(maxWidth: .infinity)
             }
             .prominentActionStyle()
             .controlSize(.large)
@@ -138,6 +145,8 @@ struct ApprovalView: View {
             armed = true
         }
     }
+
+    private var approveTitle: String { request.kind == .publicKey ? "Share" : "Approve" }
 
     /// "Signing with", plus the wallet when there are several.
     private var accountCaption: String {
