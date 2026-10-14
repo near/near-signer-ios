@@ -27,7 +27,11 @@ public actor NearAppSession {
 
     /// Handles one raw APDU and returns response data followed by the status word.
     public func handle(_ raw: Data) async -> Data {
-        guard let command = APDUCommand(raw) else { return StatusWord.wrongLength.bytes }
+        guard let command = APDUCommand(raw) else {
+            // Like every other error, drops a half-received signing request.
+            reset()
+            return StatusWord.wrongLength.bytes
+        }
         do {
             return try await dispatch(command) + StatusWord.ok.bytes
         } catch let status as StatusWord {

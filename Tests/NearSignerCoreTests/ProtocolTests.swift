@@ -196,6 +196,22 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(truncated, StatusWord.wrongLength.bytes)
     }
 
+    /// A garbled APDU drops a half-received request, so the host's retry starts clean.
+    func testGarbledAPDUDropsPartialRequest() async throws {
+        let (session, presenter, _) = try makeSession(answers: [true])
+        let payload = try XCTUnwrap(Data(base64Encoded: Fixtures.transactions[0].borsh))
+        let commands = NearAPDU.signCommands(ins: NearAPDU.insSignTransaction, path: .ledgerDefault,
+                                             payload: payload, chunkSize: 16)
+        let first = await session.handle(commands[0].serialized)
+        XCTAssertEqual(first, StatusWord.ok.bytes)
+        let garbled = await session.handle(Data([0x80, 0x02, 0x00, 0x57, 10, 1, 2]))
+        XCTAssertEqual(garbled, StatusWord.wrongLength.bytes)
+
+        let response = await exchange(session, commands)
+        XCTAssertEqual(response.suffix(2), StatusWord.ok.bytes)
+        XCTAssertEqual(presenter.shownCount, 1)
+    }
+
     func testNoKeyReportsLocked() async throws {
         let service = SignerService(vault: InMemoryKeyVault(material: nil), presenter: ScriptedPresenter(answers: [true]),
                                     history: HistoryStore(fileURL: nil))
