@@ -145,6 +145,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "NEAR Signer";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = YES;
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "NEAR Signer receives transactions to sign from your computer over Bluetooth.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Face ID protects your NEAR key: every signature requires it.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -179,6 +180,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "NEAR Signer";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = YES;
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "NEAR Signer receives transactions to sign from your computer over Bluetooth.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Face ID protects your NEAR key: every signature requires it.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
