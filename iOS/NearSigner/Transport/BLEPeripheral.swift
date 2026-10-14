@@ -27,7 +27,8 @@ final class BLEPeripheral: NSObject, CBPeripheralManagerDelegate, @unchecked Sen
     /// Every host writes as soon as it has subscribed; see `answerLostProbe(of:)`.
     private static let lostProbeDelay: TimeInterval = 1
 
-    private final class Connection {
+    /// Used only on `queue`, like the rest of the peripheral's state.
+    private final class Connection: @unchecked Sendable {
         let central: CBCentral
         let link: BLELink
         let continuation: AsyncStream<Data>.Continuation
@@ -237,11 +238,12 @@ final class BLEPeripheral: NSObject, CBPeripheralManagerDelegate, @unchecked Sen
         let (stream, continuation) = AsyncStream.makeStream(of: Data.self, bufferingPolicy: .bufferingOldest(4096))
         // One consumer per central keeps packets and responses in order. Cancelling the task
         // (on disconnect) cancels a pending approval prompt.
+        let identifier = central.identifier
         let task = Task { [weak self] in
             for await packet in stream {
                 let notifications = await link.receive(packet)
                 guard !Task.isCancelled, let self else { break }
-                self.queue.async { self.send(notifications, to: central) }
+                self.queue.async { self.send(notifications, to: identifier) }
             }
         }
         let connection = Connection(central: central, link: link, continuation: continuation, task: task)
@@ -268,8 +270,8 @@ final class BLEPeripheral: NSObject, CBPeripheralManagerDelegate, @unchecked Sen
 
     // MARK: Notifications
 
-    private func send(_ packets: [Data], to central: CBCentral) {
-        guard connections[central.identifier] != nil else { return }
+    private func send(_ packets: [Data], to identifier: UUID) {
+        guard let central = connections[identifier]?.central else { return }
         outbox.append(contentsOf: packets.map { (central: central, packet: $0) })
         flush()
     }
