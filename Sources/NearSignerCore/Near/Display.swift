@@ -15,10 +15,13 @@ public struct RequestDisplay: Equatable, Sendable {
     /// What a recognized request does besides what its card shows, such as a storage deposit paid
     /// first. Shown next to the card; the sections list them too.
     public var extras: [DisplayField]
+    /// A meta-transaction (NEP-366): an app submits it and pays the network fee. The UI marks it
+    /// with an icon rather than in the title.
+    public var isRelayed: Bool
 
     public init(title: String, symbol: DisplaySymbol = .multiple, network: String? = nil,
                 warnings: [String] = [], sections: [DisplaySection] = [], highlight: Highlight? = nil,
-                extras: [DisplayField] = []) {
+                extras: [DisplayField] = [], isRelayed: Bool = false) {
         self.title = title
         self.symbol = symbol
         self.network = network
@@ -26,7 +29,10 @@ public struct RequestDisplay: Equatable, Sendable {
         self.sections = sections
         self.highlight = highlight
         self.extras = extras
+        self.isRelayed = isRelayed
     }
+
+    public static let relayedExplanation = "an app sends this for you and pays the network fee"
 
     /// Sections a person needs to decide: accounts, amounts, actions.
     public var primarySections: [DisplaySection] { sections.filter { !$0.isTechnical } }
@@ -43,12 +49,14 @@ public struct RequestDisplay: Equatable, Sendable {
             warnings: warnings.map { NearFormat.visible($0) },
             sections: sections.map { $0.sanitized() },
             highlight: highlight?.sanitized(),
-            extras: extras.map { DisplayField(NearFormat.visible($0.label), NearFormat.visible($0.value), style: $0.style) })
+            extras: extras.map { DisplayField(NearFormat.visible($0.label), NearFormat.visible($0.value), style: $0.style) },
+            isRelayed: isRelayed)
     }
 
     /// Plain-text rendering, used by the terminal simulator.
     public var text: String {
         var lines = [title]
+        if isRelayed { lines.append("  (relayed: \(RequestDisplay.relayedExplanation))") }
         for warning in warnings { lines.append("  ! \(warning)") }
         for section in sections {
             lines.append("")
@@ -442,7 +450,7 @@ public enum RequestRenderer {
         // in the details.
         var warnings: [String] = []
         if NearFormat.inferredNetwork(action.senderId) == nil && NearFormat.inferredNetwork(action.receiverId) == nil {
-            warnings.append("The network can't be told from the account names, and meta-transactions are not tied to one: it is valid on any network where this account and key exist.")
+            warnings.append("The network can't be told from the account names, and a relayed transaction isn't tied to one: it is valid on any network where this account and key exist.")
         }
         var overview: [DisplayField] = [
             DisplayField("Sender", action.senderId, style: .monospace),
@@ -456,7 +464,7 @@ public enum RequestRenderer {
         if !total.isZero {
             overview.append(DisplayField("Total attached NEAR", NearFormat.near(total), style: total > U128(1) ? .amount : .text))
         }
-        var sections = [DisplaySection(title: "Delegate action", fields: overview)]
+        var sections = [DisplaySection(title: "Relayed transaction", fields: overview)]
         var depositWarnings: [String] = []
         for (index, inner) in action.actions.enumerated() {
             let rendered = render(action: inner, signerId: action.senderId, receiverId: action.receiverId,
@@ -474,16 +482,16 @@ public enum RequestRenderer {
             DisplayField("Valid until block", String(action.maxBlockHeight)),
         ], isTechnical: true))
         if let recognized = Recognizers.recognize(actions: action.actions, signerId: action.senderId, receiverId: action.receiverId) {
-            return RequestDisplay(title: "Meta-tx: " + recognized.title, symbol: recognized.symbol, network: network,
+            return RequestDisplay(title: recognized.title, symbol: recognized.symbol, network: network,
                                   warnings: unique(recognized.warnings + warnings),
                                   sections: recognizedSections(recognized, from: action.senderId, network: network,
                                                                total: totalDeposit(action.actions), generic: sections),
-                                  highlight: recognized.highlight, extras: recognized.extras)
+                                  highlight: recognized.highlight, extras: recognized.extras, isRelayed: true)
         }
         return RequestDisplay(
-            title: "Meta-tx: " + title(for: action.actions, signerId: action.senderId, receiverId: action.receiverId),
+            title: title(for: action.actions, signerId: action.senderId, receiverId: action.receiverId),
             symbol: symbol(for: action.actions), network: network,
-            warnings: unique(depositWarnings + warnings), sections: sections)
+            warnings: unique(depositWarnings + warnings), sections: sections, isRelayed: true)
     }
 
     public static func render(message payload: NEP413Payload, digest: Data) -> RequestDisplay {

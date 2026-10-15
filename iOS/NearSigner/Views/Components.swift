@@ -249,7 +249,7 @@ extension HistoryRecord.Kind {
     var label: String {
         switch self {
         case .transaction: return "Transaction"
-        case .delegateAction: return "Meta-transaction"
+        case .delegateAction: return "Transaction"
         case .message: return "Message"
         case .publicKey: return "Address shared"
         }
@@ -283,6 +283,53 @@ struct SymbolBadge: View {
             .frame(width: size, height: size)
             .background(tint.opacity(0.15), in: Circle())
             .accessibilityHidden(true)
+    }
+}
+
+/// The network and, for a meta-transaction, a relay mark that explains itself when tapped. Who
+/// sends a transaction rarely matters to the user, so it isn't in the title.
+struct RequestBadges: View {
+    let network: String?
+    let isRelayed: Bool
+    @State private var explained = false
+
+    private var explanation: String {
+        let text = RequestDisplay.relayedExplanation
+        return text.prefix(1).uppercased() + text.dropFirst() + "."
+    }
+
+    var body: some View {
+        if network != nil || isRelayed {
+            VStack(spacing: 8) {
+                HStack(spacing: 8) {
+                    if let network {
+                        NetworkBadge(network: network)
+                    }
+                    if isRelayed {
+                        Button {
+                            withAnimation { explained.toggle() }
+                        } label: {
+                            Image(systemName: DisplaySymbol.relay.systemImage)
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 4)
+                                .foregroundStyle(Color.secondary)
+                                .background(Color.secondary.opacity(0.15), in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Relayed")
+                        .accessibilityHint("Explains who sends this transaction")
+                    }
+                }
+                if explained {
+                    Text(explanation)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
     }
 }
 

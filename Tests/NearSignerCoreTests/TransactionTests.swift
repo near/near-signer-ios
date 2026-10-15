@@ -105,7 +105,9 @@ final class TransactionTests: XCTestCase {
         let key = try ledgerKey()
         XCTAssertTrue(key.publicKey.isValidSignature(Data(base64Encoded: Fixtures.delegateSignature)!, for: digest))
         let display = RequestRenderer.render(delegateAction: action, digest: digest)
-        XCTAssertTrue(display.title.hasPrefix("Meta-tx: 2 actions on app.testnet"))
+        XCTAssertTrue(display.title.hasPrefix("2 actions on app.testnet"))
+        XCTAssertTrue(display.isRelayed)
+        XCTAssertTrue(display.text.contains("relayed: an app sends this for you and pays the network fee"))
     }
 
     func testRelayTransactionWithSignedDelegate() throws {
@@ -116,6 +118,7 @@ final class TransactionTests: XCTestCase {
         XCTAssertEqual(signed.delegateAction.senderId, "alice.testnet")
         let display = RequestRenderer.render(transaction: tx, hash: SigningDigest.transaction(bytes))
         XCTAssertEqual(display.title, "Relay meta-tx from alice.testnet")
+        XCTAssertFalse(display.isRelayed, "the relayer's own transaction")
         XCTAssertTrue(display.text.contains("Inner action 2: Function call"))
     }
 

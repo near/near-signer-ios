@@ -72,9 +72,7 @@ struct ApprovalView: View {
                 .font(.title2.bold())
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
-            if let network = request.display.network {
-                NetworkBadge(network: network)
-            }
+            RequestBadges(network: request.display.network, isRelayed: request.display.isRelayed)
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 8)

@@ -314,7 +314,9 @@ Warnings are kept for what needs a decision: unusual amounts, recipients that lo
 that get full access, tokens that can't be taken at face value. How a request works (a relayer
 submits a meta-transaction, a DAO calls a contract when a proposal passes) is not a warning, and
 the 1 yoctoNEAR confirmation deposit many contracts require reads "1 yoctoNEAR", in normal-size
-text. Titles shorten implicit account ids (`5bb0a9…8123ca`); the card shows them in full.
+text. Titles shorten implicit account ids (`5bb0a9…8123ca`); the card shows them in full. A
+meta-transaction reads like any other request; a relay icon next to the network marks it, and
+tapping the icon explains that an app sends it and pays the network fee.
 
 Large requests arrive slowly over Bluetooth (a 1 MB deployment is thousands of APDUs). Once a
 request passes 8 KB, a "Receiving a request" card shows the bytes received, speed, time left and

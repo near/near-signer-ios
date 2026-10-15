@@ -167,6 +167,7 @@ struct HistoryDetailView: View {
                         .font(.title3.bold())
                         .multilineTextAlignment(.center)
                     OutcomeBadge(record: record)
+                    RequestBadges(network: nil, isRelayed: display?.isRelayed ?? false)
                     Text(record.date.formatted(date: .long, time: .shortened))
                         .font(.footnote)
                         .foregroundStyle(.secondary)

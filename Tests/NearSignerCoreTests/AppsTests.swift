@@ -99,7 +99,8 @@ final class AppsTests: XCTestCase {
         let delegate = DelegateAction(senderId: "alice.near", receiverId: "bob.near", actions: [.transfer(deposit: U128(decimal: "2000000000000000000000000")!)],
                                       nonce: 1, maxBlockHeight: 100, publicKey: key)
         let meta = try PreparedRequest(kind: .nep366, payload: delegate.borsh).display
-        XCTAssertEqual(meta.title, "Meta-tx: Send 2 NEAR to bob.near")
+        XCTAssertEqual(meta.title, "Send 2 NEAR to bob.near", "the app marks it relayed with an icon")
+        XCTAssertTrue(meta.isRelayed)
         XCTAssertEqual(try move(meta).amount.text, "2 NEAR")
 
         // A transfer plus anything else is shown action by action.
@@ -381,7 +382,8 @@ final class AppsTests: XCTestCase {
         let delegate = DelegateAction(senderId: "frol.near", receiverId: "june-8th.sputnik-dao.near", actions: [vote],
                                       nonce: 1, maxBlockHeight: 219_799_141, publicKey: key)
         let display = try PreparedRequest(kind: .nep366, payload: delegate.borsh).display
-        XCTAssertEqual(display.title, "Meta-tx: Vote Approve on proposal #8")
+        XCTAssertEqual(display.title, "Vote Approve on proposal #8")
+        XCTAssertTrue(display.isRelayed)
         XCTAssertTrue(display.warnings.isEmpty, "the card marks the website's description instead")
         guard case let .dao(action) = try XCTUnwrap(display.highlight) else { return XCTFail("expected a DAO card") }
         XCTAssertEqual(action.details.map { $0.title.trimmingCharacters(in: .whitespaces) }, ["", "Call 1 of 1 on v1.signer"])
