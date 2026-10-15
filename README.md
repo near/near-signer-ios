@@ -91,7 +91,7 @@ host/python/                  near-signer-host CLI (stdlib only; `bleak` for Blu
 host/compat/                  runs near-connect's real Ledger executor against the simulator
 scripts/                      test-all.sh, format.sh, fixture regeneration, app icon generator
                               (NEAR symbol from the near.org site header), token icon renderer
-.github/                      CI workflows (GitHub Actions), Dependabot settings, CODEOWNERS
+.github/                      CI and Claude review workflows, Dependabot settings, CODEOWNERS
 ```
 
 ## Protocol
@@ -475,6 +475,11 @@ GitHub Actions runs on every push to `main` or `master` and on every pull reques
 
 The workflow pins every action to a commit, and Dependabot proposes updates once a release is two
 weeks old. Nothing is signed or published: signing needs the developer's own Apple team.
+
+Claude reviews each pull request when it's opened or marked ready for review, and again when a
+maintainer comments `@claude review` (`.github/workflows/claude-pr-review.yml`, with the
+instructions in `.github/prompts/pr-review.prompt.md`). It needs the `ANTHROPIC_API` secret, and
+it skips pull requests from forks.
 
 Formatting is checked, so run the formatter before committing:
 

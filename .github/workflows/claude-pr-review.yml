@@ -1,0 +1,74 @@
+name: Claude Code Review
+
+on:
+  pull_request:
+    types: [opened, ready_for_review] # When the PR is ready for review (not a draft)
+  issue_comment:
+    types: [created] # "@claude review" in a PR comment
+
+jobs:
+  claude-review:
+    # PRs from forks get no secrets, so they are skipped. A comment triggers a review only when
+    # its author can write to the repository, so outsiders can't spend the API key.
+    if: |
+      (github.event_name == 'pull_request' && !github.event.pull_request.draft &&
+       github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request &&
+       contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association) &&
+       (contains(github.event.comment.body, '@claude review') ||
+        contains(github.event.comment.body, '@claude code review')))
+
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Fetch PR comments context
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+          REPO_OWNER: ${{ github.repository_owner }}
+          REPO_NAME: ${{ github.event.repository.name }}
+        run: bash .github/scripts/fetch-pr-comments.sh
+
+      - name: Build review prompt
+        run: |
+          DELIM="PROMPT_EOF_$(uuidgen)"
+          {
+            echo "REVIEW_PROMPT<<$DELIM"
+            echo '<pr_context>'
+            echo "REPO: ${{ github.repository }}"
+            echo "PR NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}"
+            echo 'LANGUAGES: Swift (iOS app, SwiftUI, CoreBluetooth, CryptoKit; platform-independent core), Python (host CLI), JavaScript (compat harness)'
+            echo '</pr_context>'
+            echo ''
+            echo '<existing_discussions>'
+            cat /tmp/pr_comments_context.txt
+            echo '</existing_discussions>'
+            echo ''
+            echo '<review_instructions>'
+            cat .github/prompts/pr-review.prompt.md
+            echo '</review_instructions>'
+            echo "$DELIM"
+          } >> "$GITHUB_ENV"
+
+      - name: Run Claude Code review
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029 # v1.0.239 @ Claude Code 2.1.287 / Agent SDK 0.3.287 (claude-opus-5-5 needs >= 2.1.280)
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API }}
+          prompt: ${{ env.REVIEW_PROMPT }}
+          claude_args: >-
+            --model claude-opus-5-5
+            --effort xhigh
+            --allowed-tools "Read,Grep,Glob,Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*)"

@@ -38,7 +38,7 @@ else
     step ruff check --fix .
     step npx --yes "$prettier" --write --log-level warn "${js_files[@]}"
 fi
-step shellcheck scripts/*.sh
+step shellcheck scripts/*.sh .github/scripts/*.sh
 
 if [ "$status" -ne 0 ]; then
     $check && echo "Formatting or lint problems; scripts/format.sh fixes the formatting ones." >&2
