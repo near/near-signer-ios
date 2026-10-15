@@ -244,11 +244,40 @@ final class AppModel {
             transports.stop()
             return
         }
+        beginStartingGrace()
         transports.start(bluetooth: bluetoothEnabled, requirePairing: requirePairing)
+    }
+
+    /// Bluetooth takes a moment to start after launch or unlocking. For the first two seconds the
+    /// link reads as ready, as it almost always is by then, instead of a "Starting…" that flashes
+    /// by and changes the card's size. Starting takes longer only when something is wrong.
+    private var inStartingGrace = false
+    private var startingGraceTask: Task<Void, Never>?
+
+    private func beginStartingGrace() {
+        inStartingGrace = true
+        startingGraceTask?.cancel()
+        startingGraceTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            self?.inStartingGrace = false
+        }
     }
 
     /// What the home screen shows about the link to computers.
     var connection: ConnectionState {
+        let state = transportState
+        if state == .starting, inStartingGrace {
+            #if targetEnvironment(simulator)
+            return .simulator(connected: 0)
+            #else
+            return .waiting
+            #endif
+        }
+        return state
+    }
+
+    private var transportState: ConnectionState {
         #if targetEnvironment(simulator)
         switch bridgeStatus {
         case .off: return .starting
