@@ -301,13 +301,11 @@ public enum NearFormat {
         DisplayField("Deposit", near(deposit), style: deposit > U128(1) ? .amount : .text)
     }
 
-    /// Pretty JSON if the bytes are UTF-8 JSON, otherwise base64.
+    /// Function call arguments: laid out by `json` if they are JSON, otherwise the text or, for
+    /// binary data, base64.
     public static func arguments(_ data: Data, limit: Int = 16_000) -> String {
         if data.isEmpty { return "(none)" }
-        if let object = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]),
-           let pretty = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]),
-           var text = String(data: pretty, encoding: .utf8) {
-            text = text.replacingOccurrences(of: "\\/", with: "/")
+        if let text = json(data) {
             return truncated(text, limit: limit, totalBytes: data.count)
         }
         if let text = String(data: data, encoding: .utf8), text.allSatisfy({ !$0.isNewline || $0 == "\n" }),
@@ -315,6 +313,22 @@ public enum NearFormat {
             return truncated("text: " + text, limit: limit, totalBytes: data.count)
         }
         return truncated("base64: " + data.base64EncodedString(), limit: limit, totalBytes: data.count)
+    }
+
+    /// A message for a contract (`msg`) or a signed message: laid out by `json` if it is JSON,
+    /// otherwise exactly as sent.
+    public static func message(_ text: String, limit: Int = 16_000) -> String {
+        let data = Data(text.utf8)
+        return truncated(json(data) ?? text, limit: limit, totalBytes: data.count)
+    }
+
+    /// The one JSON layout used wherever a request shows JSON: one entry per line, two-space
+    /// indents, `"key": value`, empty objects and arrays as `{}` and `[]`. Only whitespace between
+    /// tokens changes: key order, strings (escapes included) and numbers stay exactly as sent, so
+    /// nothing is rounded, reordered or merged (a repeated key shows twice). Nil unless `data` is
+    /// JSON as contracts read it (`JSONInspector.isStrict`): a trailing comma, say, is shown as sent.
+    public static func json(_ data: Data) -> String? {
+        JSONInspector.layout(data)
     }
 
     private static func truncated(_ text: String, limit: Int, totalBytes: Int) -> String {
@@ -474,7 +488,7 @@ public enum RequestRenderer {
         }
         var fields = [
             DisplayField("Recipient (app)", payload.recipient, style: .monospace),
-            DisplayField("Message", payload.message, style: .code),
+            DisplayField("Message", NearFormat.message(payload.message), style: .code),
         ]
         if let callbackUrl = payload.callbackUrl {
             fields.append(DisplayField("Callback URL", callbackUrl, style: .monospace))

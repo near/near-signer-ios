@@ -18,6 +18,7 @@ extension Highlight {
             move.amount.tokenId = visible(move.amount.tokenId)
             move.counterparty = move.counterparty.map(visible)
             move.memo = move.memo.map(visible)
+            move.message = move.message.map { NearFormat.visible($0, allowNewlines: true) }
             return .tokenMove(move)
         case var .swap(swap):
             swap.give = swap.give.map { var amount = $0; amount.tokenId = visible(amount.tokenId); return amount }
@@ -55,8 +56,8 @@ public struct TokenMove: Equatable, Sendable {
     public var memo: String?
     /// "NEAR Intents" when the move happens there.
     public var venue: String?
-    /// The `msg` the receiving contract acts on (`ft_transfer_call` and the like). It can route the
-    /// tokens on to another account, so the card shows it.
+    /// The `msg` the receiving contract acts on (`ft_transfer_call` and the like), laid out by
+    /// `NearFormat.message`. It can route the tokens on to another account, so the card shows it.
     public var message: String?
 
     public init(kind: Kind, amount: TokenAmount, counterparty: String? = nil, memo: String? = nil, venue: String? = nil,
@@ -284,7 +285,7 @@ enum Recognizers {
                     warnings.append("Also executes \(intents.count) signed intent\(intents.count == 1 ? "" : "s") after the deposit.")
                 }
                 if let memo { fields.append(DisplayField("Memo", memo)) }
-                if !msg.isEmpty { fields.append(DisplayField("Message", msg, style: .code)) }
+                if !msg.isEmpty { fields.append(DisplayField("Message", NearFormat.message(msg), style: .code)) }
                 return Recognized(
                     title: "Deposit \(tokens.shortText) to \(venue)",
                     symbol: .deposit,
@@ -294,13 +295,13 @@ enum Recognizers {
             }
             fields.insert(DisplayField("Recipient", receiver, style: .monospace), at: 1)
             if let memo { fields.append(DisplayField("Memo", memo)) }
-            fields.append(DisplayField("Message to the recipient", msg.isEmpty ? "(empty)" : NearFormat.arguments(Data(msg.utf8)), style: .code))
+            fields.append(DisplayField("Message to the recipient", msg.isEmpty ? "(empty)" : NearFormat.message(msg), style: .code))
             warnings.append(messageWarning(receiver))
             return Recognized(
                 title: "Send \(tokens.shortText) to \(NearFormat.shortAccountId(receiver))",
                 symbol: .send,
                 highlight: .tokenMove(TokenMove(kind: .send, amount: tokens, counterparty: receiver, memo: memo,
-                                                message: msg.isEmpty ? nil : msg)),
+                                                message: msg.isEmpty ? nil : NearFormat.message(msg))),
                 sections: [DisplaySection(title: "Token transfer and call", fields: fields)],
                 warnings: warnings)
         }
@@ -448,7 +449,9 @@ enum Recognizers {
                 DisplayField("Recipient", receiver, style: .monospace),
             ])
             if !token.isEmpty { result.fields.append(DisplayField("Token", tokenLabel(amount), style: .monospace)) }
-            if let msg = fields["msg"] as? String { result.fields.append(DisplayField("Message to the recipient", msg, style: .code)) }
+            if let msg = fields["msg"] as? String {
+                result.fields.append(DisplayField("Message to the recipient", NearFormat.message(msg), style: .code))
+            }
             result.warnings = unknownTokenWarnings([amount])
             return result
         case "FunctionCall":
@@ -580,14 +583,14 @@ enum Recognizers {
         var warnings = unknownTokenWarnings([amount])
         let msg = args["msg"] as? String
         if let msg {
-            fields.append(DisplayField("Message to the recipient", msg, style: .code))
+            fields.append(DisplayField("Message to the recipient", NearFormat.message(msg), style: .code))
             warnings.append(messageWarning(receiver))
         }
         return Recognized(
             title: "Withdraw \(amount.shortText) from \(venue) to \(NearFormat.shortAccountId(receiver))",
             symbol: .withdraw,
             highlight: .tokenMove(TokenMove(kind: .withdraw, amount: amount, counterparty: receiver,
-                                            memo: args["memo"] as? String, venue: venue, message: msg)),
+                                            memo: args["memo"] as? String, venue: venue, message: msg.map { NearFormat.message($0) })),
             sections: [DisplaySection(title: "Withdraw from \(venue)", fields: fields)],
             warnings: warnings)
     }
@@ -679,7 +682,7 @@ enum Recognizers {
                 fields += tokens.map { DisplayField("Amount", $0.text, style: .amount) }
                 let msg = intent["msg"] as? String
                 if let msg {
-                    fields.append(DisplayField("Message to the recipient", msg, style: .code))
+                    fields.append(DisplayField("Message to the recipient", NearFormat.message(msg), style: .code))
                     warnings.append("\(receiver) is notified with the message shown and acts on it: it can pass the tokens on to another account.")
                 }
                 if let minGas = intent["min_gas"] { fields.append(DisplayField("Minimum gas", "\(minGas)")) }
@@ -688,7 +691,7 @@ enum Recognizers {
                 symbol = .send
                 if tokens.count == 1 {
                     highlight = .tokenMove(TokenMove(kind: .send, amount: tokens[0], counterparty: receiver,
-                                                     memo: intent["memo"] as? String, venue: venue, message: msg))
+                                                     memo: intent["memo"] as? String, venue: venue, message: msg.map { NearFormat.message($0) }))
                 }
             case "ft_withdraw", "native_withdraw":
                 known.formUnion(kind == "native_withdraw" ? ["receiver_id", "amount"]
@@ -712,13 +715,13 @@ enum Recognizers {
                 }
                 let msg = intent["msg"] as? String
                 if let msg {
-                    fields.append(DisplayField("Message to the recipient", msg, style: .code))
+                    fields.append(DisplayField("Message to the recipient", NearFormat.message(msg), style: .code))
                     warnings.append(messageWarning(receiver))
                 }
                 if let minGas = intent["min_gas"] { fields.append(DisplayField("Minimum gas", "\(minGas)")) }
                 title = "Withdraw \(amount.shortText) to \(NearFormat.shortAccountId(receiver))"
                 highlight = .tokenMove(TokenMove(kind: .withdraw, amount: amount, counterparty: receiver,
-                                                 memo: intent["memo"] as? String, venue: venue, message: msg))
+                                                 memo: intent["memo"] as? String, venue: venue, message: msg.map { NearFormat.message($0) }))
                 symbol = .withdraw
             case "add_public_key", "remove_public_key":
                 known.insert("public_key")
@@ -760,7 +763,7 @@ enum Recognizers {
         let details = DisplaySection(title: "Details", fields: [
             DisplayField("Nonce", payload.nonce.base64EncodedString(), style: .monospace),
             DisplayField("Signed digest", Base58.encode(digest), style: .monospace),
-            DisplayField("Signed message", payload.message, style: .code),
+            DisplayField("Signed message", NearFormat.message(payload.message), style: .code),
         ], isTechnical: true)
         // The card spells out what the intents do, so the signature itself needs no warning.
         warnings += unknownTokenWarnings(amounts)
@@ -774,10 +777,11 @@ enum Recognizers {
 
     // MARK: Helpers
 
-    /// Parses a JSON object. Nil if the JSON has duplicate keys anywhere: parsers disagree on
-    /// which value wins, so the summary could show a different value than the contract reads.
+    /// Parses a JSON object. Nil if the JSON has duplicate keys anywhere (parsers disagree on
+    /// which value wins, so the summary could show a different value than the contract reads) or
+    /// is something only Foundation accepts, such as a trailing comma.
     static func json(_ data: Data) -> [String: Any]? {
-        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        guard JSONInspector.isStrict(data), let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               !JSONInspector.hasDuplicateKeys(data) else { return nil }
         return object
     }
@@ -793,11 +797,12 @@ enum Recognizers {
         NearFormat.arguments(data).hasSuffix("the hash covers all bytes)")
     }
 
+    /// Parsed JSON shown in the same layout as raw JSON (`NearFormat.json`), keys sorted.
     static func prettyJSON(_ value: Any) -> String {
         guard JSONSerialization.isValidJSONObject(value),
-              let data = try? JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted, .sortedKeys]),
-              let text = String(data: data, encoding: .utf8) else { return "\(value)" }
-        return text.replacingOccurrences(of: "\\/", with: "/")
+              let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys, .withoutEscapingSlashes]),
+              let text = NearFormat.json(data) else { return "\(value)" }
+        return text
     }
 
     /// A u128 amount as NEAR contracts read it: a JSON string parsed like Rust's

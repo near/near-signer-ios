@@ -98,7 +98,7 @@ private struct CardRow: View {
     let label: String
     let value: String
     var monospaced = false
-    /// Host-supplied text (a memo, a message) is capped, so it can't push the rest out of view.
+    /// Host-supplied text (a memo) is capped, so it can't push the rest out of view.
     var lineLimit: Int?
 
     var body: some View {
@@ -113,6 +113,42 @@ private struct CardRow: View {
                 .valueMenu(value, title: label)
         }
         .font(.callout)
+    }
+}
+
+/// The `msg` the receiving contract acts on, in the core's JSON layout (or as sent, if it isn't
+/// JSON). Where the tokens end up can depend on it, so it's on the card; a long one is capped and
+/// continues under Details.
+private struct MessageBlock: View {
+    let message: String
+    private static let lineLimit = 12
+
+    /// Roughly how many lines it wraps to on a narrow iPhone (about 32 characters each). Erring
+    /// high only shows the note when nothing is cut.
+    private var isLong: Bool {
+        let lines = message.split(separator: "\n", omittingEmptySubsequences: false)
+            .reduce(0) { $0 + max(1, ($1.count + 31) / 32) }
+        return lines > MessageBlock.lineLimit
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Message")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            DataText(message)
+                .font(.footnote.monospaced())
+                .lineLimit(MessageBlock.lineLimit)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10)
+                .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .valueMenu(message, title: "Message")
+            if isLong {
+                Text("The full message is under Details.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 }
 
@@ -183,8 +219,7 @@ struct TokenMoveCard: View {
                         CardRow(label: "Contract", value: contract, monospaced: true)
                     }
                     if let message = move.message {
-                        // Where the tokens end up can depend on it. Long ones open in full from Details.
-                        CardRow(label: "Message", value: message, monospaced: true, lineLimit: 6)
+                        MessageBlock(message: message)
                     }
                     if let memo = move.memo, !memo.isEmpty {
                         CardRow(label: "Memo", value: memo, lineLimit: 4)
