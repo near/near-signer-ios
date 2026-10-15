@@ -91,7 +91,7 @@ host/python/                  near-signer-host CLI (stdlib only; `bleak` for Blu
 host/compat/                  runs near-connect's real Ledger executor against the simulator
 scripts/                      test-all.sh, format.sh, fixture regeneration, app icon generator
                               (NEAR symbol from the near.org site header), token icon renderer
-.github/                      CI workflows (GitHub Actions) and Dependabot settings
+.github/                      CI workflows (GitHub Actions), Dependabot settings, CODEOWNERS
 ```
 
 ## Protocol
@@ -519,3 +519,8 @@ Not verified, because there was no Mac or iPhone:
   for both device and Simulator builds. The real SDK may still disagree on details.
 - How the screens look, in light and dark mode.
 - Bluetooth radio behaviour, including pairing with macOS, Linux and Windows hosts.
+
+## License
+
+MIT, see [LICENSE](LICENSE). The NEAR logo and the token logos belong to their owners and aren't
+covered by it.
