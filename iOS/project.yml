@@ -27,6 +27,7 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         INFOPLIST_KEY_CFBundleDisplayName: NEAR Signer
+        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
         INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription: NEAR Signer receives transactions to sign from your computer over Bluetooth.
         INFOPLIST_KEY_NSFaceIDUsageDescription: "Face ID protects your NEAR key: every signature requires it."
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
