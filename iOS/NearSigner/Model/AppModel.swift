@@ -66,6 +66,9 @@ final class AppModel {
     /// Unlocked for this visit; the app locks again when it goes to the background.
     private(set) var isUnlocked = false
     private(set) var isUnlocking = false
+    /// Unlocked while Face ID or the passcode prompt was still closing (the app is inactive until
+    /// it has): the privacy shield stays off, so the lock screen gives way straight to the app.
+    private var unlockedWhileInactive = false
     private(set) var unlockError: String?
     /// The lock screen asks for Face ID by itself once per visit; after a cancel, the button does.
     @ObservationIgnored private var autoUnlockPending = true
@@ -218,6 +221,7 @@ final class AppModel {
 
     func setSceneActive(_ active: Bool) {
         isSceneActive = active
+        if active { unlockedWhileInactive = false }
         if !active {
             // Automatic refusals are written in batches; write them before iOS may suspend the app.
             let store = historyStore
@@ -225,9 +229,13 @@ final class AppModel {
         }
     }
 
+    /// Covers the app while it's inactive (the app switcher, the Face ID prompt). The lock screen
+    /// covers it already.
+    var showsPrivacyShield: Bool { !isSceneActive && !isLocked && !unlockedWhileInactive }
+
     /// Whether the overlay window has something to show.
     var needsOverlay: Bool {
-        pendingRequest != nil || receiving != nil || errorMessage != nil || !isSceneActive || isLocked
+        pendingRequest != nil || receiving != nil || errorMessage != nil || showsPrivacyShield || isLocked
     }
 
     private func startTransports() {
@@ -268,6 +276,7 @@ final class AppModel {
 
     private func lock() {
         isUnlocked = false
+        unlockedWhileInactive = false
         unlockError = nil
         autoUnlockPending = true
         // A focused text field under the lock screen would bring its keyboard back over it.
@@ -305,21 +314,25 @@ final class AppModel {
                 defaults.set(passcode, forKey: "unlockWithPasscode")
             }
             unlockError = nil
-            isUnlocked = true
-            startTransports()
+            finishUnlock()
         } catch KeyError.authenticationCancelled {
             // Stays locked; the Unlock button asks again.
         } catch VaultError.noPasscode {
             #if targetEnvironment(simulator)
             // The Simulator has no passcode, and Face ID only if enrolled in its Features menu.
-            isUnlocked = true
-            startTransports()
+            finishUnlock()
             #else
             unlockError = VaultError.noPasscode.errorDescription
             #endif
         } catch {
             unlockError = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
         }
+    }
+
+    private func finishUnlock() {
+        unlockedWhileInactive = !isSceneActive
+        isUnlocked = true
+        startTransports()
     }
 
     func setAppLock(_ enabled: Bool) async {

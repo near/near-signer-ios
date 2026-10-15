@@ -47,7 +47,9 @@ struct RootView: View {
         }
         // Fallback for the moment before the overlay window exists.
         .overlay {
-            if scenePhase != .active { PrivacyShield() }
+            if scenePhase != .active && (model.showsPrivacyShield || model.isLocked) {
+                PrivacyShield()
+            }
         }
         // Approvals, errors and the privacy shield are shown by the overlay window, above any sheet.
         .alert("Wallets from an earlier installation", isPresented: Binding(

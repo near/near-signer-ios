@@ -57,9 +57,8 @@ private struct OverlayContent: View {
             if let message = model.errorMessage {
                 ErrorCard(message: message) { model.errorMessage = nil }
             }
-            // Hides everything from the app switcher snapshot and while Face ID is shown. The lock
-            // screen hides everything already.
-            if !model.isSceneActive && !model.isLocked {
+            // Hides everything from the app switcher snapshot and while Face ID is shown.
+            if model.showsPrivacyShield {
                 PrivacyShield()
             }
         }

@@ -535,10 +535,18 @@ struct QRCodeSheet: View {
                     Text("Scan with another device's camera.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
-                    DataText(value)
-                        .font(.footnote.monospaced())
-                        .multilineTextAlignment(.center)
-                        .lineLimit(12)
+                    if value.contains("\n") {
+                        // JSON and other multi-line values keep their indents.
+                        DataText(value)
+                            .font(.footnote.monospaced())
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(10)
+                            .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    } else {
+                        DataText(value)
+                            .font(.footnote.monospaced())
+                            .multilineTextAlignment(.center)
+                    }
                 }
                 .padding()
             }
