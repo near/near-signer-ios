@@ -39,6 +39,8 @@ public enum BIP39 {
         let checksumBits = entropy.count / 4
         let hash = Data(SHA256.hash(data: entropy))
         var bits: [Bool] = []
+        bits.reserveCapacity(entropy.count * 8 + checksumBits)
+        defer { bits.withUnsafeMutableBytes { SecretBytes.wipe($0) } }
         for byte in entropy { bits.append(contentsOf: byteBits(byte)) }
         bits.append(contentsOf: byteBits(hash[0]).prefix(checksumBits))
         return stride(from: 0, to: bits.count, by: 11).map { start in
@@ -55,7 +57,9 @@ public enum BIP39 {
         var entropy = try SecureRandom.bytes(wordCount * 11 * 32 / 33 / 8)
         defer { entropy.resetBytes(in: 0..<entropy.count) }
         let words = try mnemonic(fromEntropy: entropy)
-        guard try validate(words) == entropy else { throw BIP39Error.invalidChecksum }
+        var decoded = try validate(words)
+        defer { decoded.resetBytes(in: 0..<decoded.count) }
+        guard decoded == entropy else { throw BIP39Error.invalidChecksum }
         return words
     }
 
@@ -66,13 +70,15 @@ public enum BIP39 {
             throw BIP39Error.invalidWordCount(words.count)
         }
         var bits: [Bool] = []
+        bits.reserveCapacity(words.count * 11)
+        defer { bits.withUnsafeMutableBytes { SecretBytes.wipe($0) } }
         for word in words {
             guard let index = wordIndex[word] else { throw BIP39Error.unknownWord(word) }
             for shift in (0..<11).reversed() { bits.append((index >> shift) & 1 == 1) }
         }
         let checksumBits = words.count * 11 / 33
         let entropyBits = bits.count - checksumBits
-        var entropy = Data()
+        var entropy = Data(capacity: entropyBits / 8)
         for start in stride(from: 0, to: entropyBits, by: 8) {
             var byte: UInt8 = 0
             for bit in bits[start..<(start + 8)] { byte = byte << 1 | (bit ? 1 : 0) }
@@ -85,28 +91,45 @@ public enum BIP39 {
     }
 
     /// PBKDF2-HMAC-SHA512(mnemonic, "mnemonic" + passphrase, 2048 iterations, 64 bytes).
+    /// The words and passphrase are Swift strings, which can't be wiped; the byte copies made
+    /// here are.
     public static func seed(from words: [String], passphrase: String = "") -> Data {
-        let password = Data(words.joined(separator: " ").decomposedStringWithCompatibilityMapping.utf8)
-        let salt = Data(("mnemonic" + passphrase).decomposedStringWithCompatibilityMapping.utf8)
+        var password = Data(words.joined(separator: " ").decomposedStringWithCompatibilityMapping.utf8)
+        var salt = Data(("mnemonic" + passphrase).decomposedStringWithCompatibilityMapping.utf8)
+        defer {
+            password.resetBytes(in: 0..<password.count)
+            salt.resetBytes(in: 0..<salt.count)
+        }
         return pbkdf2SHA512(password: password, salt: salt, iterations: 2048, keyLength: 64)
     }
 
+    /// Intermediate blocks are wiped; only the returned key remains.
     static func pbkdf2SHA512(password: Data, salt: Data, iterations: Int, keyLength: Int) -> Data {
         let key = SymmetricKey(data: password)
-        var derived = Data()
-        var blockIndex: UInt32 = 1
-        while derived.count < keyLength {
-            var blockSalt = salt
+        let blocks = (keyLength + 63) / 64
+        var derived = Data(capacity: blocks * 64)
+        var blockSalt = Data(capacity: salt.count + 4)
+        var u = Data(count: 64)
+        var block = [UInt8](repeating: 0, count: 64)
+        defer {
+            blockSalt.resetBytes(in: 0..<blockSalt.count)
+            u.resetBytes(in: 0..<u.count)
+            block.withUnsafeMutableBytes { SecretBytes.wipe($0) }
+        }
+        for blockIndex in 1...UInt32(blocks) {
+            blockSalt.removeAll(keepingCapacity: true)
+            blockSalt.append(salt)
             withUnsafeBytes(of: blockIndex.bigEndian) { blockSalt.append(contentsOf: $0) }
-            var u = Data(HMAC<SHA512>.authenticationCode(for: blockSalt, using: key))
-            var block = [UInt8](u)
-            for _ in 1..<iterations {
-                u = Data(HMAC<SHA512>.authenticationCode(for: u, using: key))
-                for (index, byte) in u.enumerated() { block[index] ^= byte }
+            var mac = HMAC<SHA512>.authenticationCode(for: blockSalt, using: key)
+            for _ in 0..<iterations {
+                mac.withUnsafeBytes { u.replaceSubrange(0..<64, with: $0) }
+                for index in 0..<64 { block[index] ^= u[index] }
+                mac = HMAC<SHA512>.authenticationCode(for: u, using: key)
             }
             derived.append(contentsOf: block)
-            blockIndex += 1
+            block.withUnsafeMutableBytes { SecretBytes.wipe($0) }
         }
+        if derived.count > keyLength { derived.resetBytes(in: keyLength..<derived.count) }
         return derived.prefix(keyLength)
     }
 

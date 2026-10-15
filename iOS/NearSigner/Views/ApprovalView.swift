@@ -6,8 +6,9 @@ import SwiftUI
 struct ApprovalView: View {
     let model: AppModel
     let request: ApprovalRequest
-    /// Approve ignores taps for a moment, so a tap already under way when the request appears
-    /// cannot approve it.
+    /// Approve ignores taps for a moment after the request becomes visible, so a tap already under
+    /// way cannot approve it. The moment restarts whenever the app comes back to the foreground: a
+    /// request can arrive while Control Center or a system alert hides the app.
     @State private var armed = false
 
     private var target: (wallet: Wallet?, account: Account?) { model.target(of: request) }
@@ -29,18 +30,20 @@ struct ApprovalView: View {
                 VStack(spacing: 20) {
                     header
                     accountCard
-                    if let highlight = request.display.highlight {
-                        HighlightCard(highlight: highlight, ownAccount: model.ownAccountLabel(for:))
-                    }
-                    if !request.display.extras.isEmpty {
-                        SectionCard(section: DisplaySection(title: "Also in this request", fields: request.display.extras))
-                    }
+                    // Warnings come before the card: a host controls how tall the card gets (a long
+                    // memo, a big proposal) and could otherwise push them out of sight.
                     if !request.display.warnings.isEmpty {
                         VStack(spacing: 10) {
                             ForEach(request.display.warnings, id: \.self) { warning in
                                 WarningCard(text: warning)
                             }
                         }
+                    }
+                    if let highlight = request.display.highlight {
+                        HighlightCard(highlight: highlight, ownAccount: model.ownAccountLabel(for:))
+                    }
+                    if !request.display.extras.isEmpty {
+                        SectionCard(section: DisplaySection(title: "Also in this request", fields: request.display.extras))
                     }
                     if request.kind == .publicKey {
                         publicKeyExplanation
@@ -140,9 +143,11 @@ struct ApprovalView: View {
             .disabled(!armed)
         }
         .padding()
-        .task {
+        .task(id: model.isSceneActive) { [active = model.isSceneActive] in
+            armed = false
+            guard active else { return }
             try? await Task.sleep(for: .seconds(1))
-            armed = true
+            if !Task.isCancelled { armed = true }
         }
     }
 

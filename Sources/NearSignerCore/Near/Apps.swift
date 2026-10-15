@@ -55,13 +55,18 @@ public struct TokenMove: Equatable, Sendable {
     public var memo: String?
     /// "NEAR Intents" when the move happens there.
     public var venue: String?
+    /// The `msg` the receiving contract acts on (`ft_transfer_call` and the like). It can route the
+    /// tokens on to another account, so the card shows it.
+    public var message: String?
 
-    public init(kind: Kind, amount: TokenAmount, counterparty: String? = nil, memo: String? = nil, venue: String? = nil) {
+    public init(kind: Kind, amount: TokenAmount, counterparty: String? = nil, memo: String? = nil, venue: String? = nil,
+                message: String? = nil) {
         self.kind = kind
         self.amount = amount
         self.counterparty = counterparty
         self.memo = memo
         self.venue = venue
+        self.message = message
     }
 }
 
@@ -195,6 +200,11 @@ enum Recognizers {
         return recognized
     }
 
+    /// For `ft_transfer_call` and withdrawals with a `msg`: the receiver decides what happens next.
+    static func messageWarning(_ receiver: String) -> String {
+        "\(receiver) receives the tokens and acts on the message shown: it can swap them or pass them on to another account. Check the message."
+    }
+
     /// Storage deposits register an account with a contract and cost well under 0.01 NEAR.
     static let largeStorageDeposit = U128(decimal: "100000000000000000000000")!   // 0.1 NEAR
     /// Sputnik DAOs usually ask 0.1 NEAR; the DAO keeps the bond if a proposal is removed as spam.
@@ -285,11 +295,12 @@ enum Recognizers {
             fields.insert(DisplayField("Recipient", receiver, style: .monospace), at: 1)
             if let memo { fields.append(DisplayField("Memo", memo)) }
             fields.append(DisplayField("Message to the recipient", msg.isEmpty ? "(empty)" : NearFormat.arguments(Data(msg.utf8)), style: .code))
-            warnings.append("\(receiver) receives the tokens and runs its own code with them (ft_transfer_call). Unused tokens are usually refunded.")
+            warnings.append(messageWarning(receiver))
             return Recognized(
                 title: "Send \(tokens.shortText) to \(NearFormat.shortAccountId(receiver))",
                 symbol: .send,
-                highlight: .tokenMove(TokenMove(kind: .send, amount: tokens, counterparty: receiver, memo: memo)),
+                highlight: .tokenMove(TokenMove(kind: .send, amount: tokens, counterparty: receiver, memo: memo,
+                                                message: msg.isEmpty ? nil : msg)),
                 sections: [DisplaySection(title: "Token transfer and call", fields: fields)],
                 warnings: warnings)
         }
@@ -515,10 +526,23 @@ enum Recognizers {
             let bounty = fields["bounty"] as? [String: Any] ?? [:]
             guard let raw = amount(bounty["amount"]) else { return unparsed(name, body) }
             let amount = TokenAmount(raw: raw, tokenId: bounty["token"] as? String ?? "")
-            return ProposalKind(summary: "Add a bounty of \(amount.shortText)", fields: [
+            // Sputnik pays the reward on every completion, up to `times`.
+            let times = uint64(bounty["times"])
+            var bountyFields = [
                 DisplayField("Reward", amount.text, style: .amount),
+                DisplayField("Paid up to", times.map { $0 == 1 ? "1 time" : "\($0) times" } ?? "?", style: times == 1 ? .text : .amount),
                 DisplayField("Bounty", bounty["description"] as? String ?? ""),
-            ])
+            ]
+            if let deadline = uint64(bounty["max_deadline"]) {
+                bountyFields.append(DisplayField("Time to finish after claiming", NearFormat.duration(nanoseconds: deadline)))
+            }
+            var bountyWarnings = unknownTokenWarnings([amount])
+            if let times, times > 1 {
+                bountyWarnings.append("The reward can be paid \(times) times, \(amount.text) each.")
+            }
+            let summary = times.map { $0 > 1 ? "Add a bounty of \(amount.shortText), up to \($0) times" : nil } ?? nil
+            return ProposalKind(summary: summary ?? "Add a bounty of \(amount.shortText)", fields: bountyFields,
+                                warnings: bountyWarnings)
         case "BountyDone":
             let receiver = fields["receiver_id"] as? String ?? "?"
             let id = uint64(fields["bounty_id"]).map(String.init) ?? "?"
@@ -553,14 +577,19 @@ enum Recognizers {
             DisplayField("Token", tokenLabel(amount), style: .monospace),
         ]
         if let memo = args["memo"] as? String { fields.append(DisplayField("Memo", memo)) }
-        if let msg = args["msg"] as? String { fields.append(DisplayField("Message to the recipient", msg, style: .code)) }
+        var warnings = unknownTokenWarnings([amount])
+        let msg = args["msg"] as? String
+        if let msg {
+            fields.append(DisplayField("Message to the recipient", msg, style: .code))
+            warnings.append(messageWarning(receiver))
+        }
         return Recognized(
             title: "Withdraw \(amount.shortText) from \(venue) to \(NearFormat.shortAccountId(receiver))",
             symbol: .withdraw,
             highlight: .tokenMove(TokenMove(kind: .withdraw, amount: amount, counterparty: receiver,
-                                            memo: args["memo"] as? String, venue: venue)),
+                                            memo: args["memo"] as? String, venue: venue, message: msg)),
             sections: [DisplaySection(title: "Withdraw from \(venue)", fields: fields)],
-            warnings: unknownTokenWarnings([amount]))
+            warnings: warnings)
     }
 
     static func intentsTransfer(args: [String: Any], venue: String) -> Recognized? {
@@ -648,9 +677,10 @@ enum Recognizers {
                 amounts += tokens
                 fields.append(DisplayField("Recipient", receiver, style: .monospace))
                 fields += tokens.map { DisplayField("Amount", $0.text, style: .amount) }
-                if let msg = intent["msg"] as? String {
+                let msg = intent["msg"] as? String
+                if let msg {
                     fields.append(DisplayField("Message to the recipient", msg, style: .code))
-                    warnings.append("\(receiver) is notified and runs its own code with the transfer.")
+                    warnings.append("\(receiver) is notified with the message shown and acts on it: it can pass the tokens on to another account.")
                 }
                 if let minGas = intent["min_gas"] { fields.append(DisplayField("Minimum gas", "\(minGas)")) }
                 let to = NearFormat.shortAccountId(receiver)
@@ -658,7 +688,7 @@ enum Recognizers {
                 symbol = .send
                 if tokens.count == 1 {
                     highlight = .tokenMove(TokenMove(kind: .send, amount: tokens[0], counterparty: receiver,
-                                                     memo: intent["memo"] as? String, venue: venue))
+                                                     memo: intent["memo"] as? String, venue: venue, message: msg))
                 }
             case "ft_withdraw", "native_withdraw":
                 known.formUnion(kind == "native_withdraw" ? ["receiver_id", "amount"]
@@ -680,14 +710,15 @@ enum Recognizers {
                     fields.append(DisplayField("Storage deposit", NearFormat.near(raw), style: .amount))
                     warnings.append("Also pays a storage deposit of \(NearFormat.near(raw)) from your wNEAR in \(venue), which is not refunded if the withdrawal fails.")
                 }
-                if let msg = intent["msg"] as? String {
+                let msg = intent["msg"] as? String
+                if let msg {
                     fields.append(DisplayField("Message to the recipient", msg, style: .code))
-                    warnings.append("\(receiver) receives the tokens and runs its own code with them.")
+                    warnings.append(messageWarning(receiver))
                 }
                 if let minGas = intent["min_gas"] { fields.append(DisplayField("Minimum gas", "\(minGas)")) }
                 title = "Withdraw \(amount.shortText) to \(NearFormat.shortAccountId(receiver))"
                 highlight = .tokenMove(TokenMove(kind: .withdraw, amount: amount, counterparty: receiver,
-                                                 memo: intent["memo"] as? String, venue: venue))
+                                                 memo: intent["memo"] as? String, venue: venue, message: msg))
                 symbol = .withdraw
             case "add_public_key", "remove_public_key":
                 known.insert("public_key")

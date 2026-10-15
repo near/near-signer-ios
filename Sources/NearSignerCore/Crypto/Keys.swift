@@ -88,24 +88,28 @@ public enum SLIP10 {
         try derive(secret: seed, path: path).data
     }
 
-    /// Derives into wiped-on-release memory and overwrites the intermediate keys.
+    /// Derives into wiped-on-release memory and overwrites the intermediate keys. The seed is
+    /// read in place, never copied.
     static func derive<Seed: ContiguousBytes>(secret seed: Seed, path: BIP32Path) throws -> SecretBytes {
         guard path.isFullyHardened else { throw KeyError.nonHardenedPath(path.description) }
-        var digest = seed.withUnsafeBytes { hmac(key: Data("ed25519 seed".utf8), data: Data($0)) }
+        var digest = seed.withUnsafeBytes { hmac(key: Data("ed25519 seed".utf8), message: $0) }
         defer { digest.resetBytes(in: 0..<digest.count) }
+        // 0x00 || parent key || index: allocated once at full size, so it is never moved.
+        var data = Data(count: 37)
+        defer { data.resetBytes(in: 0..<data.count) }
         for component in path.components {
-            var data = Data([0]) + digest.prefix(32)
-            withUnsafeBytes(of: component.bigEndian) { data.append(contentsOf: $0) }
-            let chainCode = Data(digest.suffix(32))
+            data.replaceSubrange(1..<33, with: digest.prefix(32))
+            withUnsafeBytes(of: component.bigEndian) { data.replaceSubrange(33..<37, with: $0) }
+            var chainCode = Data(digest.suffix(32))
             digest.resetBytes(in: 0..<digest.count)
-            digest = hmac(key: chainCode, data: data)
-            data.resetBytes(in: 0..<data.count)
+            digest = hmac(key: chainCode, message: data)
+            chainCode.resetBytes(in: 0..<chainCode.count)
         }
         return SecretBytes(digest.prefix(32))
     }
 
-    private static func hmac(key: Data, data: Data) -> Data {
-        Data(HMAC<SHA512>.authenticationCode(for: data, using: SymmetricKey(data: key)))
+    private static func hmac<Message: DataProtocol>(key: Data, message: Message) -> Data {
+        Data(HMAC<SHA512>.authenticationCode(for: message, using: SymmetricKey(data: key)))
     }
 }
 
@@ -133,10 +137,16 @@ public enum KeyMaterial: Equatable, Sendable {
     /// Compact storage format: 1 tag byte + secret bytes. The caller should wipe the result
     /// (`resetBytes`) once stored.
     public var serialized: Data {
+        let (tag, secret): (UInt8, SecretBytes)
         switch self {
-        case let .bip39Seed(seed): return Data([1]) + seed.data
-        case let .ed25519(secret): return Data([2]) + secret.data
+        case let .bip39Seed(seed): (tag, secret) = (1, seed)
+        case let .ed25519(key): (tag, secret) = (2, key)
         }
+        // Built in place, so no other copy of the secret is left behind.
+        var result = Data(capacity: 1 + secret.count)
+        result.append(tag)
+        secret.withUnsafeBytes { result.append(contentsOf: $0) }
+        return result
     }
 
     public init(serialized data: Data) throws {
@@ -151,7 +161,8 @@ public enum KeyMaterial: Equatable, Sendable {
 
     public static func fromMnemonic(_ phrase: String, passphrase: String = "") throws -> KeyMaterial {
         let words = BIP39.normalize(phrase)
-        try BIP39.validate(words)
+        var entropy = try BIP39.validate(words)
+        entropy.resetBytes(in: 0..<entropy.count)
         var seed = BIP39.seed(from: words, passphrase: passphrase)
         defer { seed.resetBytes(in: 0..<seed.count) }
         return .bip39Seed(SecretBytes(seed))

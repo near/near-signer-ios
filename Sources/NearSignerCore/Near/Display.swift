@@ -140,12 +140,16 @@ public enum NearFormat {
     /// selectors), the blank Braille pattern, spaces other than U+0020 and the narrow no-break
     /// space used for digit grouping, and line and paragraph separators. A host could otherwise
     /// hide or reorder text on the approval screen. `allowNewlines` keeps `\n` and `\t` (for
-    /// multi-line values such as function-call arguments).
+    /// multi-line values such as function-call arguments). Combining marks beyond the third on one
+    /// character are escaped too: a tall stack of them draws over the lines around it.
     public static func visible(_ text: String, allowNewlines: Bool = false) -> String {
         var result = ""
         result.unicodeScalars.reserveCapacity(text.unicodeScalars.count)
+        var marks = 0
         for scalar in text.unicodeScalars {
-            if isHidden(scalar, allowNewlines: allowNewlines) {
+            let category = scalar.properties.generalCategory
+            marks = category == .nonspacingMark || category == .enclosingMark ? marks + 1 : 0
+            if isHidden(scalar, allowNewlines: allowNewlines) || marks > maxCombiningMarks {
                 result += "\\u{\(String(scalar.value, radix: 16, uppercase: true))}"
             } else {
                 result.unicodeScalars.append(scalar)
@@ -153,6 +157,9 @@ public enum NearFormat {
         }
         return result
     }
+
+    /// Enough for every script's real text (Vietnamese and Indic scripts use two or three).
+    static let maxCombiningMarks = 3
 
     private static func isHidden(_ scalar: Unicode.Scalar, allowNewlines: Bool) -> Bool {
         switch scalar.properties.generalCategory {
@@ -188,6 +195,18 @@ public enum NearFormat {
         fraction = String(repeating: "0", count: 12 - fraction.count) + fraction
         while fraction.hasSuffix("0") { fraction.removeLast() }
         return (fraction.isEmpty ? "\(integer)" : "\(integer).\(fraction)") + " Tgas"
+    }
+
+    /// "7 days 12 hours" from nanoseconds, whole seconds, nothing rounded up.
+    static func duration(nanoseconds: UInt64) -> String {
+        var rest = nanoseconds / 1_000_000_000
+        var parts: [String] = []
+        for (size, name) in [(UInt64(86_400), "day"), (3_600, "hour"), (60, "minute"), (1, "second")] where rest >= size {
+            let count = rest / size
+            rest %= size
+            parts.append("\(count) \(name)\(count == 1 ? "" : "s")")
+        }
+        return parts.isEmpty ? "0 seconds" : parts.joined(separator: " ")
     }
 
     /// Network guessed from the account suffix. Transactions do not carry a chain id;

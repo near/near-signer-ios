@@ -87,6 +87,7 @@ public struct HistoryRecord: Codable, Identifiable, Equatable, Sendable {
 public actor HistoryStore {
     public nonisolated let fileURL: URL?
     private let writeOptions: Data.WritingOptions
+    private let excludedFromBackup: Bool
     private let maxRecords: Int
     private var records: [HistoryRecord]
 
@@ -99,10 +100,13 @@ public actor HistoryStore {
     ///   - fileURL: nil keeps the history in memory only.
     ///   - maxPayloadBytes: raw payloads are kept for the newest records up to this total; older
     ///     records keep their hash, title and fields but not the bytes (contract code is large).
-    public init(fileURL: URL?, writeOptions: Data.WritingOptions = [.atomic], maxRecords: Int = 2000,
-                maxPayloadBytes: Int = 16 * 1024 * 1024) {
+    ///   - excludedFromBackup: keeps the file out of iCloud and computer backups (Apple platforms).
+    ///     The history holds signed requests, NEP-413 sign-in messages included.
+    public init(fileURL: URL?, writeOptions: Data.WritingOptions = [.atomic], excludedFromBackup: Bool = false,
+                maxRecords: Int = 2000, maxPayloadBytes: Int = 16 * 1024 * 1024) {
         self.fileURL = fileURL
         self.writeOptions = writeOptions
+        self.excludedFromBackup = excludedFromBackup
         self.maxRecords = maxRecords
         self.maxPayloadBytes = maxPayloadBytes
         if let fileURL, let data = try? Data(contentsOf: fileURL),
@@ -111,6 +115,8 @@ public actor HistoryStore {
         } else {
             self.records = []
         }
+        // A file written before the flag existed.
+        if excludedFromBackup, let fileURL { HistoryStore.excludeFromBackup(fileURL) }
     }
 
     /// Reads the file again. The iOS app calls it once protected data is available: a launch while
@@ -195,6 +201,17 @@ public actor HistoryStore {
         try FileManager.default.createDirectory(
             at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: fileURL, options: writeOptions)
+        // An atomic write replaces the file, and the new one starts without the flag.
+        if excludedFromBackup { HistoryStore.excludeFromBackup(fileURL) }
+    }
+
+    private static func excludeFromBackup(_ fileURL: URL) {
+        #if canImport(Darwin)
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        var url = fileURL
+        try? url.setResourceValues(values)
+        #endif
     }
 
     private static let encoder: JSONEncoder = {

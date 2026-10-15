@@ -78,7 +78,7 @@ public enum TokenRegistry {
         Token(contract: "bera-0x779ded0c9e1022225f8e0630b35a9b54be713736.omft.near", symbol: "USDT0", name: "USDT0 (Berachain)", decimals: 6, icon: "token-usdt"),
         Token(contract: "nep245:v2_1.omni.hot.tg:196_2fezDCvVYRsG8wrK6deJ2VRPiAS1", symbol: "USDT0", name: "USDT0 (X Layer)", decimals: 6, icon: "token-usdt"),
         Token(contract: "nep245:v2_1.omni.hot.tg:143_4EJiJxSALvGoTZbnc8K7Ft9533et", symbol: "USDT", name: "Tether USD (Monad)", decimals: 6, icon: "token-usdt"),
-        Token(contract: "nep245:v2_1.omni.hot.tg:9745_3aL9skCy1yhPoDB8oKMmRHRN7SJW", symbol: "USDT", name: "Tether USD (Plasma)", decimals: 6, icon: "token-usdt"),
+        Token(contract: "nep245:v2_1.omni.hot.tg:9745_3aL9skCy1yhPoDB8oKMmRHRN7SJW", symbol: "USDT", name: "Tether USD (Plasma, HOT Bridge)", decimals: 6, icon: "token-usdt"),
         Token(contract: "plasma-0xb8ce59fc3717ada4c02eadf9682a9e934f625ebb.omft.near", symbol: "USDT", name: "Tether USD (Plasma)", decimals: 6, icon: "token-usdt"),
         Token(contract: "gnosis-0x4ecaba5870353805a9f068101a40e0f32ed605c6.omft.near", symbol: "USDT", name: "Tether USD (Gnosis)", decimals: 6, icon: "token-usdt"),
         Token(contract: "wrap.testnet", symbol: "wNEAR", name: "Wrapped NEAR (testnet)", decimals: 24, icon: "token-near"),
@@ -130,7 +130,11 @@ public struct TokenAmount: Equatable, Sendable {
         if let internalToken = internalToken(tokenId) {
             return internalToken.name.hasPrefix("imt:") ? nil : knownToken(for: internalToken.name)
         }
-        if tokenId.hasPrefix("nep141:") { return TokenRegistry.token(contract: String(tokenId.dropFirst(7))) }
+        if tokenId.hasPrefix("nep141:") {
+            // "nep141:" alone names no contract; it must not read as native NEAR.
+            let contract = String(tokenId.dropFirst(7))
+            return contract.isEmpty ? nil : TokenRegistry.token(contract: contract)
+        }
         // A plain contract, or a NEP-245 token listed under its full id.
         return TokenRegistry.token(contract: tokenId)
     }

@@ -34,6 +34,9 @@ public actor BLELink {
         case .none:
             return []
         case .mtuRequest:
+            // Hosts probe when they open the transport: whatever an earlier one left half-sent on
+            // this link must not be glued onto the next request.
+            await session.reset()
             return [BLEFraming.mtuResponse(packetSize: packetSize)]
         case let .apdu(apdu):
             let response = await session.handle(apdu)

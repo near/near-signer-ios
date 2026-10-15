@@ -301,7 +301,8 @@ final class ProtocolTests: XCTestCase {
         var assembler = BLEFrameAssembler()
         XCTAssertEqual(try assembler.receive(Data([8, 0, 0, 0, 0])), .mtuRequest)
         XCTAssertThrowsError(try assembler.receive(Data([0x05, 0, 2, 1])))
-        XCTAssertThrowsError(try assembler.receive(Data([0x07, 0, 0])))
+        var fresh = BLEFrameAssembler()
+        XCTAssertThrowsError(try fresh.receive(Data([0x07, 0, 0])))
         // A new sequence 0 restarts reassembly after a lost packet.
         _ = try assembler.receive(Data([0x05, 0, 0, 0, 10, 1, 2]))
         XCTAssertEqual(try assembler.receive(Data([0x05, 0, 0, 0, 1, 9])), .apdu(Data([9])))

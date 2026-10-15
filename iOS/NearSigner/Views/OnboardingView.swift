@@ -236,7 +236,7 @@ struct CreateWalletView: View {
                     FeatureRow(symbol: "camera.fill", title: "No screenshots or photos",
                                text: "Anyone who sees the words can take your funds. Never type them into a website.")
                     FeatureRow(symbol: "trash", title: "This phone is not a backup",
-                               text: "Deleting the app or turning off the iPhone passcode erases the key here. Only the words bring it back.")
+                               text: "Turning off the iPhone passcode or erasing the iPhone destroys the key here. Only the words bring it back.")
                 }
             }
             .padding(24)
@@ -411,6 +411,7 @@ struct RestoreWalletView: View {
     let model: AppModel
     var onFinished: () -> Void = {}
     @State private var phrase = ""
+    @State private var pasted = PastedSecret()
     @FocusState private var focused: Bool
     @StateObject private var capture = ScreenCaptureMonitor()
 
@@ -443,6 +444,7 @@ struct RestoreWalletView: View {
                         .textInputAutocapitalization(.never)
                         .keyboardType(.asciiCapable)
                         .focused($focused)
+                        .onChange(of: phrase) { old, new in pasted.textChanged(from: old, to: new) }
                 }
             } header: {
                 Text("Recovery Phrase")
@@ -461,7 +463,7 @@ struct RestoreWalletView: View {
                 }
                 .disabled(!status.ok)
             } footer: {
-                Text("Use the phrase from your Ledger or another NEAR wallet. It never leaves this phone. Keep your paper copy: deleting the app, resetting the iPhone or turning off its passcode erases the key here, and without the phrase the funds are lost forever. Nobody can recover them.")
+                Text("Use the phrase from your Ledger or another NEAR wallet. It never leaves this phone. Keep your paper copy: erasing the iPhone or turning off its passcode destroys the key here, and without the phrase the funds are lost forever. Nobody can recover them.")
             }
 
             Section {
@@ -473,16 +475,16 @@ struct RestoreWalletView: View {
             }
         }
         .navigationTitle("Restore wallet")
+        .onDisappear { pasted.clear() }
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { focused = true }
     }
 
     private func restore() {
         // Whatever the outcome (a typo, a duplicate wallet), the pasted phrase leaves the pasteboard.
-        defer { Pasteboard.clearIfHolds(phrase) }
+        defer { pasted.clear() }
         do {
             if model.addWallet(try KeyMaterial.fromMnemonic(phrase)) {
-                Pasteboard.clearIfHolds(phrase)
                 phrase = ""
                 onFinished()
             }
@@ -498,6 +500,7 @@ struct ImportKeyView: View {
     let model: AppModel
     var onFinished: () -> Void = {}
     @State private var secret = ""
+    @State private var pasted = PastedSecret()
     @StateObject private var capture = ScreenCaptureMonitor()
 
     var body: some View {
@@ -511,11 +514,12 @@ struct ImportKeyView: View {
                         .font(.body.monospaced())
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
+                        .onChange(of: secret) { old, new in pasted.textChanged(from: old, to: new) }
                 }
             } header: {
                 Text("Private Key")
             } footer: {
-                Text("For advanced users. A key from ~/.near-credentials or near-cli-rs export. An imported key is a wallet with a single account. Keep a copy: deleting the app, resetting the iPhone or turning off its passcode erases it here, and without a copy the funds are lost forever. Nobody can recover them.")
+                Text("For advanced users. A key from ~/.near-credentials or near-cli-rs export. An imported key is a wallet with a single account. Keep a copy: erasing the iPhone or turning off its passcode destroys it here, and without a copy the funds are lost forever. Nobody can recover them.")
             }
             Section {
                 Button {
@@ -529,15 +533,15 @@ struct ImportKeyView: View {
             }
         }
         .navigationTitle("Import private key")
+        .onDisappear { pasted.clear() }
         .navigationBarTitleDisplayMode(.inline)
     }
 
     private func importKey() {
         // Whatever the outcome (a typo, a duplicate wallet), the pasted key leaves the pasteboard.
-        defer { Pasteboard.clearIfHolds(secret) }
+        defer { pasted.clear() }
         do {
             if model.addWallet(try KeyMaterial.fromNearSecretKey(secret)) {
-                Pasteboard.clearIfHolds(secret)
                 secret = ""
                 onFinished()
             }
@@ -547,19 +551,19 @@ struct ImportKeyView: View {
     }
 }
 
-/// Clears the pasteboard if it still holds a secret the user pasted in. Case and spacing are
-/// ignored, so a phrase copied with capitals or line breaks still matches.
-enum Pasteboard {
-    static func clearIfHolds(_ secret: String) {
-        let secret = normalized(secret)
-        guard !secret.isEmpty, UIPasteboard.general.hasStrings, let text = UIPasteboard.general.string else { return }
-        let held = normalized(text)
-        // Part of the secret counts too (a few words copied at a time), but not a lone short word.
-        guard held.contains(secret) || (held.count >= 8 && secret.contains(held)) else { return }
-        UIPasteboard.general.items = []
+/// Clears the pasteboard after a secret was pasted into a field, if nothing was copied since.
+/// It never reads the pasteboard: since iOS 16 a read asks the user for permission, and a refusal
+/// would leave the secret there. A paste shows as the text growing by several characters at once
+/// (dictation can look the same; clearing the pasteboard then is harmless).
+struct PastedSecret {
+    private var changeCount: Int?
+
+    mutating func textChanged(from old: String, to new: String) {
+        if new.count - old.count >= 8 { changeCount = UIPasteboard.general.changeCount }
     }
 
-    private static func normalized(_ text: String) -> String {
-        text.lowercased().split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+    mutating func clear() {
+        if let changeCount, changeCount == UIPasteboard.general.changeCount { UIPasteboard.general.items = [] }
+        changeCount = nil
     }
 }

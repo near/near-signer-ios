@@ -64,6 +64,9 @@ public struct BLEFrameAssembler {
     /// After a lost packet the rest of that message is dropped quietly until the next one starts,
     /// so the host gets a single error reply.
     private var discarding = false
+    /// The last sequence number dropped while discarding. One that goes back means the next
+    /// message has begun and lost its first packet: that message gets its own error reply.
+    private var discardedSequence: UInt16 = 0
 
     public init() {}
 
@@ -80,8 +83,15 @@ public struct BLEFrameAssembler {
             reset()
             return .mtuRequest
         }
-        guard tag == BLEFraming.apduTag else { try fail(.unexpectedTag(tag)) }
-        guard bytes.count >= 3 else { try fail(.malformedPacket) }
+        // While a message is being dropped, more garbage gets no further replies.
+        guard tag == BLEFraming.apduTag else {
+            if discarding { return .none }
+            try fail(.unexpectedTag(tag))
+        }
+        guard bytes.count >= 3 else {
+            if discarding { return .none }
+            try fail(.malformedPacket)
+        }
         let sequence = UInt16(bytes[1]) << 8 | UInt16(bytes[2])
         var dataStart = 3
         if sequence == 0 {
@@ -93,9 +103,13 @@ public struct BLEFrameAssembler {
             dataStart = 5
             discarding = false
         } else if discarding {
+            guard sequence > discardedSequence else {
+                try fail(.unexpectedSequence(expected: 0, got: sequence), at: sequence)
+            }
+            discardedSequence = sequence
             return .none
         } else if sequence != nextSequence {
-            try fail(.unexpectedSequence(expected: nextSequence, got: sequence))
+            try fail(.unexpectedSequence(expected: nextSequence, got: sequence), at: sequence)
         }
         buffer.append(contentsOf: bytes[dataStart...])
         nextSequence &+= 1
@@ -108,9 +122,10 @@ public struct BLEFrameAssembler {
     }
 
     /// Drops the message in progress; its remaining packets are ignored until the next one starts.
-    private mutating func fail(_ error: FramingError) throws -> Never {
+    private mutating func fail(_ error: FramingError, at sequence: UInt16 = 0) throws -> Never {
         reset()
         discarding = true
+        discardedSequence = sequence
         throw error
     }
 }

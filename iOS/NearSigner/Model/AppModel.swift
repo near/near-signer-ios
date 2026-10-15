@@ -118,7 +118,7 @@ final class AppModel {
 
         let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         historyStore = HistoryStore(fileURL: directory.appendingPathComponent("signing-history.json"),
-                                    writeOptions: [.atomic, .completeFileProtection])
+                                    writeOptions: [.atomic, .completeFileProtection], excludedFromBackup: true)
         legacyAccountsURL = directory.appendingPathComponent("accounts.json")
         let registry = WalletRegistry(url: directory.appendingPathComponent("wallets.json"))
         self.registry = registry

@@ -98,6 +98,8 @@ private struct CardRow: View {
     let label: String
     let value: String
     var monospaced = false
+    /// Host-supplied text (a memo, a message) is capped, so it can't push the rest out of view.
+    var lineLimit: Int?
 
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
@@ -107,6 +109,7 @@ private struct CardRow: View {
             DataText(value)
                 .font(monospaced ? .callout.monospaced() : .callout.weight(.medium))
                 .multilineTextAlignment(.trailing)
+                .lineLimit(lineLimit)
                 .valueMenu(value, title: label)
         }
         .font(.callout)
@@ -143,6 +146,7 @@ struct TokenMoveCard: View {
 
     private var hasDetails: Bool {
         received != nil || (recipientLabel == nil && move.counterparty != nil) || !(move.memo ?? "").isEmpty
+            || move.message != nil
     }
 
     var body: some View {
@@ -178,8 +182,12 @@ struct TokenMoveCard: View {
                     if recipientLabel == nil, let contract = move.counterparty {
                         CardRow(label: "Contract", value: contract, monospaced: true)
                     }
+                    if let message = move.message {
+                        // Where the tokens end up can depend on it. Long ones open in full from Details.
+                        CardRow(label: "Message", value: message, monospaced: true, lineLimit: 6)
+                    }
                     if let memo = move.memo, !memo.isEmpty {
-                        CardRow(label: "Memo", value: memo)
+                        CardRow(label: "Memo", value: memo, lineLimit: 4)
                     }
                 }
             }
@@ -311,6 +319,12 @@ private struct SwapSide: View {
                     TokenIcon(amount: amount, size: 36)
                     VStack(alignment: .leading, spacing: 2) {
                         TokenAmountText(amount: amount, size: 24)
+                        // Tells apart tokens with one symbol (USDC on NEAR and USDC from Ethereum).
+                        if let token = amount.token, token.name.caseInsensitiveCompare(token.symbol) != .orderedSame {
+                            Text(token.name)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                         TokenIssuerText(amount: amount, alignment: .leading)
                     }
                     Spacer(minLength: 0)

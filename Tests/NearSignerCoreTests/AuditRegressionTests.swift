@@ -125,6 +125,35 @@ final class AuditRegressionTests: XCTestCase {
         XCTAssertEqual(NearFormat.visible("zero\u{200B}width"), "zero\\u{200B}width")
     }
 
+    /// Final audit, display: nothing a host controls hides what matters.
+    func testFinalAuditDisplayFixes() throws {
+        // "nep141:" names no contract, and must not read as native NEAR (an imt: token can use it).
+        XCTAssertFalse(TokenAmount(raw: U128(5), tokenId: "imt:evil.near:nep141:").isKnown)
+        XCTAssertFalse(TokenAmount(raw: U128(5), tokenId: "nep141:").isKnown)
+        XCTAssertTrue(TokenAmount(raw: U128(5), tokenId: "").isKnown, "a bare empty id is native NEAR")
+
+        // A tall stack of combining marks is escaped beyond the third.
+        let stacked = "rent" + String(repeating: "\u{0301}", count: 10)
+        XCTAssertEqual(NearFormat.visible(stacked), "rent\u{0301}\u{0301}\u{0301}" + String(repeating: "\\u{301}", count: 7))
+        XCTAssertEqual(NearFormat.visible("Việt"), "Việt")
+
+        // A withdrawal from NEAR Intents with a msg warns, and its card shows the message.
+        let withdrawArgs = #"{"token":"usdt.tether-token.near","receiver_id":"bridge.near","amount":"1000000","msg":"to:attacker"}"#
+        let withdraw = try display(receiver: "intents.near", [call("ft_withdraw", withdrawArgs)])
+        XCTAssertTrue(withdraw.warnings.contains { $0.contains("acts on the message shown") })
+        guard case let .tokenMove(move)? = withdraw.highlight else { return XCTFail("expected a card") }
+        XCTAssertEqual(move.message, "to:attacker")
+
+        // A DAO bounty says how many times it pays.
+        let bounty = try display(receiver: "dao.sputnik-dao.near", [call("add_proposal", """
+            {"proposal":{"description":"x","kind":{"AddBounty":{"bounty":{"description":"d","token":"",\
+            "amount":"1000000000000000000000000","times":1000,"max_deadline":"604800000000000"}}}}}
+            """, deposit: U128(decimal: "100000000000000000000000")!)])
+        XCTAssertTrue(bounty.warnings.contains { $0.contains("can be paid 1000 times") })
+        XCTAssertEqual(NearFormat.duration(nanoseconds: 604_800_000_000_000), "7 days")
+        XCTAssertEqual(NearFormat.duration(nanoseconds: 90_061_000_000_000), "1 day 1 hour 1 minute 1 second")
+    }
+
     /// Ids may break anywhere when they wrap, so iOS never adds a hyphen they don't have.
     func testIdsWrapWithoutHyphens() {
         let zwsp = "\u{200B}"
@@ -364,6 +393,46 @@ final class AuditRegressionTests: XCTestCase {
         XCTAssertThrowsError(try assembler.receive(Data([0x05, 0, 0, 0])), "short first packet")
         XCTAssertEqual(try assembler.receive(Data([0x05, 0, 1, 3])), .none)
         XCTAssertEqual(try assembler.receive(Data([0x05, 0, 0, 0, 2, 9, 9])), .apdu(Data([9, 9])))
+    }
+
+    /// A message that loses its first packet while an earlier one is still being dropped gets its
+    /// own error reply, instead of none (the host would wait minutes).
+    func testLostFirstPacketAfterAnErrorIsAnswered() throws {
+        var assembler = BLEFrameAssembler()
+        XCTAssertEqual(try assembler.receive(Data([0x05, 0, 0, 0, 10, 1, 2])), .none)
+        XCTAssertThrowsError(try assembler.receive(Data([0x05, 0, 2, 3])), "packet 1 lost")
+        XCTAssertEqual(try assembler.receive(Data([0x05, 0, 3, 4])), .none, "rest of the message dropped quietly")
+        XCTAssertEqual(try assembler.receive(Data([0x09])), .none, "no second reply for more garbage")
+        // The next message's packet 0 is lost: its packet 1 is reported once.
+        XCTAssertThrowsError(try assembler.receive(Data([0x05, 0, 1, 7])))
+        XCTAssertEqual(try assembler.receive(Data([0x05, 0, 2, 8])), .none)
+        XCTAssertEqual(try assembler.receive(Data([0x05, 0, 0, 0, 1, 9])), .apdu(Data([9])))
+    }
+
+    /// A host that opens the transport again (MTU probe) starts clean: chunks an earlier upload left
+    /// behind are not glued onto its request.
+    func testProbeDropsAHalfSentUpload() async throws {
+        let service = SignerService(vault: InMemoryKeyVault(material: material), presenter: ScriptedPresenter(answers: [true]),
+                                    history: HistoryStore(fileURL: nil))
+        let link = BLELink(session: NearAppSession(service: service, transport: "test"), packetSize: 64)
+        var assembler = BLEFrameAssembler()
+        func exchange(_ command: APDUCommand) async throws -> Data {
+            var reply = Data()
+            for packet in BLEFraming.frames(for: command.serialized, packetSize: 64) {
+                for notification in await link.receive(packet) {
+                    if case let .apdu(data) = try assembler.receive(notification) { reply = data }
+                }
+            }
+            return reply
+        }
+        let tx = try XCTUnwrap(Data(base64Encoded: Fixtures.transactions[0].borsh))
+        let commands = NearAPDU.signCommands(ins: NearAPDU.insSignTransaction, path: .ledgerDefault, payload: tx, chunkSize: 64)
+        let first = try await exchange(commands[0])
+        XCTAssertEqual(first, StatusWord.ok.bytes)
+        _ = await link.receive(Data([BLEFraming.mtuTag, 0, 0, 0, 0]))
+        var response = Data()
+        for command in commands { response = try await exchange(command) }
+        XCTAssertEqual(response.suffix(2), StatusWord.ok.bytes)
     }
 
     /// Refused requests lose their bytes before approved ones do.

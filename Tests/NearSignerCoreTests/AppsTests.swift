@@ -62,7 +62,10 @@ final class AppsTests: XCTestCase {
 
         let transferCall = try display(receiver: usdc, [call("ft_transfer_call", #"{"receiver_id":"v2.ref-finance.near","amount":"1000000","msg":"{\"actions\":[]}"}"#)])
         XCTAssertEqual(transferCall.title, "Send 1 USDC to v2.ref-finance.near")
-        XCTAssertTrue(transferCall.warnings.contains { $0.contains("runs its own code") })
+        XCTAssertTrue(transferCall.warnings.contains { $0.contains("acts on the message shown") })
+        // The message decides where the tokens go, so the card shows it.
+        guard case let .tokenMove(called)? = transferCall.highlight else { return XCTFail("expected a card") }
+        XCTAssertEqual(called.message, #"{"actions":[]}"#)
 
         // Something else on a token contract is not dressed up.
         let other = try display(receiver: usdc, [call("ft_balance_of", #"{"account_id":"bob.near"}"#)])

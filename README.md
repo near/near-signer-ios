@@ -216,7 +216,8 @@ public keys are decoded and displayed, but the device itself signs with ed25519.
   the words, the user has to confirm they understand that losing them loses the wallet for good.
 - **Typing secrets.** Third-party keyboards are disabled app-wide, recovery-phrase and key inputs
   are hidden while the screen is recorded or mirrored, and a pasted secret is cleared from the
-  pasteboard after import. Secrets are held in memory that is wiped when released (best effort).
+  pasteboard after import, or when the screen is left. Clearing doesn't read the pasteboard, so
+  iOS asks no paste permission. Secrets are held in memory that is wiped when released (best effort).
 - **iPhone only.** The app does not run on iPad or Mac, where the privacy overlay and
   screen-capture detection are not reliable. Devices without a Secure Enclave are refused.
 - **Always on top.** Approval requests, the lock screen, errors and the privacy shield are shown in a separate
@@ -234,8 +235,10 @@ public keys are decoded and displayed, but the device itself signs with ed25519.
 - **History and wallets.** Both files are stored with `.completeFileProtection`, so they are
   unreadable while the phone is locked. Requests refused without a prompt keep only their hash and
   size, raw payloads are kept up to 16 MB in total, and when the history is full, refusals are
-  dropped before approved signatures, so a hostile host cannot flush the record of what was signed. They hold public data only. The app waits until the
-  phone is unlocked before reading them (iOS may launch apps early), instead of acting on an
+  dropped before approved signatures, so a hostile host cannot flush the record of what was signed.
+  Neither holds a secret. Both are excluded from iCloud and computer backups, because the history
+  keeps signed requests, NEP-413 sign-in messages included. The app waits until the phone is
+  unlocked before reading them (iOS may launch apps early), instead of acting on an
   empty list.
 - **One Secure Enclave key per wallet.** Each wallet's secret is wrapped by its own Secure
   Enclave key. Removing a wallet deletes both.
@@ -277,14 +280,15 @@ public keys are decoded and displayed, but the device itself signs with ed25519.
 ## Readable requests
 
 The core recognizes these operations and gives the app a summary for a dedicated card. The
-approval screen then shows the card, anything the request does besides it (such as a storage
-deposit paid first, under "Also in this request") and the warnings; every field, including the
-generic per-action ones, is one tap away under "Details", so nothing is hidden.
+approval screen shows the warnings first, then the card and anything the request does besides it
+(such as a storage deposit paid first, under "Also in this request"); every field, including the
+generic per-action ones, is one tap away under "Details", so nothing is hidden. Memos on the card
+are cut at four lines, so a long one can't push the rest out of view.
 
 | Operation | Recognized calls | Card |
 |---|---|---|
 | NEAR transfer | a single `Transfer` action (also in a meta-transaction) | amount with NEAR icon, recipient and its kind, "your account" when it is one of the phone's own |
-| Token transfer (NEP-141) | `ft_transfer`, `ft_transfer_call` (with an optional `storage_deposit` first) | amount with token icon, recipient, memo |
+| Token transfer (NEP-141) | `ft_transfer`, `ft_transfer_call` (with an optional `storage_deposit` first) | amount with token icon, recipient, memo, and the `msg` of a transfer call |
 | Wrapped NEAR | `near_deposit`, `near_withdraw` on `wrap.near` / `wrap.testnet` | wrap or unwrap amount |
 | NEAR Intents deposit | `ft_transfer_call` to `intents.near` or `intents.far` (also after `near_deposit`) | amount, credited account |
 | NEAR Intents on chain | `ft_withdraw`, `mt_transfer`, `add_public_key`, `remove_public_key` on `intents.near` or `intents.far` | withdrawal, transfer, key change |
@@ -492,47 +496,11 @@ format a few lines differently. `.editorconfig` gives editors, Xcode included, t
   - Add the device's key to the account.
 - Both derivations are verified against `near-seed-phrase` in the tests.
 
-## Security audit
-
-Five independent reviews covered cryptography and decoding, the protocol and transports, key
-storage and the wallet lifecycle, display integrity, and the host tools. Every
-finding was verified, fixed, and, where it can run on Linux, turned into a regression test
-(`Tests/NearSignerCoreTests/AuditRegressionTests.swift`). The most serious one: NEAR Intents
-amounts written as `"+1000"` (valid for the contract) were dropped from the summary card, which
-could hide a transfer; amounts now parse exactly as the contract does, and anything unreadable
-disables the summary.
-
-A second review of the fixes found more, all fixed:
-
-- Strict Face ID was enforced by the app only: after a reinstall, Restore brought wallets back
-  with the passcode accepted again. It is now enforced by the Secure Enclave and survives a
-  reinstall (see above), and Restore needs Face ID or the passcode.
-- Summary cards dropped the generic warnings (for example "arguments too long to show", or the
-  meta-transaction network warning). They now keep them.
-- JSON nested in an `ft_transfer_call` message or a DAO proposal's call skipped the duplicate-key
-  check and could be cut short on screen; either now disables the summary.
-- Restoring a wallet that was already listed could leave an orphaned key; it is now deleted.
-- `near-signer-host` now verifies NEP-366 signatures and refuses transactions that name a
-  non-ed25519 key.
-- Smaller fixes: the storage deposit names the account it registers; more invisible characters
-  are escaped; signer and receiver names are sanitized in the history; requests cut off by a
-  disconnect and automatic refusals keep no payload, and automatic refusals are written in
-  batches; refused requests lose their stored bytes before approved ones; any malformed BLE
-  packet drops the rest of its message; a pasted phrase is cleared from the pasteboard whatever
-  its case or spacing, and also when the import fails.
-
-A final check of those fixes found that updating from the previous build would have switched
-Strict Face ID off (now migrated, see above), that "remove the wallet" advice appeared for any
-failure of a strict wallet (now only when the Secure Enclave refuses the key, with the readable
-message shown in signing results), and that cancelling Face ID for Restore hid the earlier
-wallets until the next launch (the choice now comes back). A race that could leave the
-progress card open after Cancel was fixed as well.
-
 ## What was verified, and what was not
 
 Verified on Linux (Swift 6.2 + swift-crypto):
 
-- **Swift unit tests.** All 93 pass. Encodings match near-api-js byte for byte; delegate and
+- **Swift unit tests.** All 100 pass. Encodings match near-api-js byte for byte; delegate and
   NEP-413 digests match; BIP-39, SLIP-10 and near-seed-phrase keys match.
 - **Python e2e tests.** All 14 pass, including fast mode over TCP and emulated BLE (checked on the wire). They check signed transactions byte for byte against near-api-js.
 - **near-connect.** The real near-connect Ledger executor (fetched from GitHub) completed MTU

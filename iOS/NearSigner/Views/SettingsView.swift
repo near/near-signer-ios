@@ -170,7 +170,7 @@ struct SecurityView: View {
                     .padding(.vertical, 2)
                 }
             } footer: {
-                Text("Bluetooth keeps working in Airplane Mode. NEAR Signer never needs the internet. Deleting the app or turning off the iPhone passcode erases the keys on this phone: keep every recovery phrase.")
+                Text("Bluetooth keeps working in Airplane Mode. NEAR Signer never needs the internet. Turning off the iPhone passcode or erasing the iPhone destroys the keys on this phone: keep every recovery phrase. Deleting the app doesn't remove them; use Remove all wallets from this phone.")
             }
 
             Section {

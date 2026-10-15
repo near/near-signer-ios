@@ -201,24 +201,28 @@ final class BLEPeripheral: NSObject, CBPeripheralManagerDelegate, @unchecked Sen
         // offset-0 request is a separate Ledger BLE packet. Only computers that subscribed to
         // notifications (every Ledger host does so first) get a connection; others are refused,
         // so they cannot hold memory or a pending prompt.
-        var packet: (central: CBCentral, data: Data)?
-        func deliver(_ pending: (central: CBCentral, data: Data)) {
-            guard let connection = connections[pending.central.identifier] else { return }
-            connection.heardFrom = true
-            connection.continuation.yield(pending.data)
-        }
+        var packets: [(central: CBCentral, data: Data)] = []
         for request in requests {
             let uuid = request.characteristic.uuid
             guard uuid == BLEPeripheral.writeUUID || uuid == BLEPeripheral.writeCommandUUID,
                   let value = request.value else { continue }
             if request.offset == 0 {
-                if let pending = packet { deliver(pending) }
-                packet = (request.central, value)
+                packets.append((request.central, value))
+            } else if let last = packets.last, last.central.identifier == request.central.identifier,
+                      request.offset == last.data.count {
+                packets[packets.count - 1].data.append(value)
             } else {
-                packet?.data.append(value)
+                // A piece must continue the packet before it, from the same central. Nothing of
+                // a write that breaks this is applied.
+                if let first = requests.first { peripheral.respond(to: first, withResult: .invalidOffset) }
+                return
             }
         }
-        if let pending = packet { deliver(pending) }
+        for packet in packets {
+            guard let connection = connections[packet.central.identifier] else { continue }
+            connection.heardFrom = true
+            connection.continuation.yield(packet.data)
+        }
         if let first = requests.first {
             let subscribed = connections[first.central.identifier] != nil
             peripheral.respond(to: first, withResult: subscribed ? .success : .writeNotPermitted)
@@ -243,7 +247,7 @@ final class BLEPeripheral: NSObject, CBPeripheralManagerDelegate, @unchecked Sen
             for await packet in stream {
                 let notifications = await link.receive(packet)
                 guard !Task.isCancelled, let self else { break }
-                self.queue.async { self.send(notifications, to: identifier) }
+                self.queue.async { self.send(notifications, to: identifier, from: link) }
             }
         }
         let connection = Connection(central: central, link: link, continuation: continuation, task: task)
@@ -270,8 +274,11 @@ final class BLEPeripheral: NSObject, CBPeripheralManagerDelegate, @unchecked Sen
 
     // MARK: Notifications
 
-    private func send(_ packets: [Data], to identifier: UUID) {
-        guard let central = connections[identifier]?.central else { return }
+    /// Replies go only to the connection whose link produced them: a central that unsubscribed and
+    /// subscribed again has a new link, and must not get an answer meant for the old one.
+    private func send(_ packets: [Data], to identifier: UUID, from link: BLELink) {
+        guard let connection = connections[identifier], connection.link === link else { return }
+        let central = connection.central
         outbox.append(contentsOf: packets.map { (central: central, packet: $0) })
         flush()
     }
