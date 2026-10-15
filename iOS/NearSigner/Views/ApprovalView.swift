@@ -174,7 +174,6 @@ struct ApprovalView: View {
 /// of it goes here too, so the screen shows the card and nothing it repeats.
 private struct TechnicalDetails: View {
     let request: ApprovalRequest
-    @State private var expanded = false
 
     private var summarized: Bool { request.display.highlight != nil }
 
@@ -190,32 +189,14 @@ private struct TechnicalDetails: View {
     }
 
     var body: some View {
-        VStack(spacing: 12) {
-            Button {
-                withAnimation { expanded.toggle() }
-            } label: {
-                HStack {
-                    Text(summarized ? "Details" : "Technical details")
-                        .font(.subheadline.weight(.semibold))
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .rotationEffect(.degrees(expanded ? 90 : 0))
-                }
-                .card()
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            if expanded {
-                RequestSectionsView(sections: (summarized ? request.display.primarySections : [])
-                    + request.display.technicalSections + [requestSection])
-                Text(ValueMenuHint.text)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 4)
-            }
+        ExpandableCard(title: summarized ? "Details" : "Technical details") {
+            RequestSectionsView(sections: (summarized ? request.display.primarySections : [])
+                + request.display.technicalSections + [requestSection])
+            Text(ValueMenuHint.text)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 4)
         }
     }
 }

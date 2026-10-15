@@ -89,6 +89,42 @@ struct CloseButton: View {
     }
 }
 
+/// A heading that opens to show more below it: details one tap away.
+struct ExpandableCard<Content: View>: View {
+    let title: String
+    @ViewBuilder let content: Content
+    @State private var expanded = false
+
+    init(title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Button {
+                withAnimation { expanded.toggle() }
+            } label: {
+                HStack {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(expanded ? 90 : 0))
+                }
+                .card()
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if expanded {
+                content
+            }
+        }
+    }
+}
+
 // MARK: - Request rendering
 
 /// Renders sections built by the core. Live approvals and history details use the same view,
@@ -373,25 +409,38 @@ struct CopyButton: View {
     }
 }
 
-/// Touch and hold a value to copy it or show it as a QR code. This phone is meant to stay
-/// offline, so a QR code is how a value usually reaches another device.
+/// Touch and hold a value to copy it, see all of it full screen, or show it as a QR code. This
+/// phone is meant to stay offline, so a QR code is how a value usually reaches another device.
 struct ValueMenu: ViewModifier {
     /// Built only when used: a raw request can be megabytes.
     let value: () -> String
+    /// Whether the value can be cut off or scroll where it's shown, so full screen helps.
+    let isLong: Bool
     let fitsQRCode: Bool
     let title: String
     @State private var showsQRCode = false
+    @State private var showsFullScreen = false
 
     func body(content: Content) -> some View {
         content
             .contextMenu {
                 Button("Copy", systemImage: "doc.on.doc") { UIPasteboard.general.string = value() }
+                if isLong {
+                    Button("Show Full Screen", systemImage: "arrow.up.left.and.arrow.down.right") { showsFullScreen = true }
+                }
                 if fitsQRCode {
                     Button("Show QR Code", systemImage: "qrcode") { showsQRCode = true }
+                } else {
+                    // Said, not hidden, so a missing QR code isn't a mystery.
+                    Button("Too Long for a QR Code", systemImage: "qrcode") {}
+                        .disabled(true)
                 }
             }
             .sheet(isPresented: $showsQRCode) {
                 QRCodeSheet(title: title, value: value())
+            }
+            .fullScreenCover(isPresented: $showsFullScreen) {
+                FullValueView(title: title, value: value())
             }
     }
 }
@@ -399,12 +448,76 @@ struct ValueMenu: ViewModifier {
 extension View {
     /// See `ValueMenu`.
     func valueMenu(_ value: String, title: String) -> some View {
-        modifier(ValueMenu(value: { value }, fitsQRCode: QRCode.fits(value), title: title))
+        modifier(ValueMenu(value: { value }, isLong: value.count > 80 || value.contains("\n"),
+                           fitsQRCode: QRCode.fits(value), title: title))
+    }
+}
+
+/// A value on a screen of its own: all of it, scrolling, and selectable in part.
+struct FullValueView: View {
+    let title: String
+    let value: String
+    @Environment(\.dismiss) private var dismiss
+
+    /// A text view slows down on megabytes (a contract deployment's raw request); Copy still
+    /// copies everything.
+    private static let shownLimit = 200_000
+
+    private var shown: String {
+        guard value.utf8.count > FullValueView.shownLimit else { return value }
+        return String(value.prefix(FullValueView.shownLimit))
+            + "\n… (only the start is shown; Copy copies all \(NearFormat.byteSize(value.utf8.count)))"
+    }
+
+    var body: some View {
+        NavigationStack {
+            SelectableText(text: shown)
+                .ignoresSafeArea(edges: .bottom)
+                .navigationTitle(title)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        CopyButton(value: value)
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        CloseButton { dismiss() }
+                    }
+                }
+        }
+    }
+}
+
+/// Read-only text that scrolls and can be selected in part. UIKit, because SwiftUI's Text can't
+/// turn off iOS 26's hyphenation, which would show a "-" that isn't in the value, and copying a
+/// selection must give the exact characters (no zero-width spaces, unlike `DataText`).
+private struct SelectableText: UIViewRepresentable {
+    let text: String
+
+    func makeUIView(context: Context) -> UITextView {
+        let view = UITextView()
+        view.isEditable = false
+        view.isSelectable = true
+        view.backgroundColor = .systemBackground
+        view.adjustsFontForContentSizeCategory = true
+        view.textContainerInset = UIEdgeInsets(top: 16, left: 12, bottom: 32, right: 12)
+        return view
+    }
+
+    func updateUIView(_ view: UITextView, context: Context) {
+        guard view.attributedText?.string != text else { return }
+        let style = NSMutableParagraphStyle()
+        style.hyphenationFactor = 0
+        style.usesDefaultHyphenation = false
+        view.attributedText = NSAttributedString(string: text, attributes: [
+            .font: UIFontMetrics(forTextStyle: .footnote).scaledFont(for: .monospacedSystemFont(ofSize: 13, weight: .regular)),
+            .foregroundColor: UIColor.label,
+            .paragraphStyle: style,
+        ])
     }
 }
 
 enum ValueMenuHint {
-    static let text = "Touch and hold a value to copy it or show it as a QR code."
+    static let text = "Touch and hold a value to copy it, see it full screen, or show it as a QR code."
 }
 
 /// A value as a QR code, to scan with another device.
@@ -453,6 +566,10 @@ struct QRCodeView: View {
                 .padding(12)
                 .background(Color.white, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .accessibilityLabel("QR code")
+        } else {
+            Label("Too long for a QR code. Copy it instead.", systemImage: "qrcode")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
         }
     }
 }

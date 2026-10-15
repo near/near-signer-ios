@@ -46,7 +46,8 @@ The app is built for people who are not developers:
 - **Values leave by QR code.** Touch and hold any value (account ids, hashes, signatures,
   arguments, the raw request) to copy it or show it as a QR code for another device's camera;
   the phone is meant to stay offline, so there are no copy buttons on their own. Values longer
-  than a QR code holds (2 331 bytes) can only be copied.
+  than a QR code holds (2 331 bytes) can only be copied, and the menu says so. Long values
+  scroll where they're shown and also open full screen, where part of them can be selected.
 - **Light and dark mode.** The app follows the system setting by default. Settings › Appearance
   can force light or dark.
 - **App lock.** Like a banking app, NEAR Signer opens on a lock screen and asks for Face ID by
@@ -349,7 +350,7 @@ entry contains:
 - the raw Borsh payload
 
 The details screen decodes the payload again and shows exactly what was on screen at approval
-time. It also shows a QR code of the explorer link, to open on another device. Public-key exports
+time, in the same order and with the same cards. It also shows a QR code of the explorer link, to open on another device. Public-key exports
 appear only for the first export of a path and for rejections.
 
 ## Testing

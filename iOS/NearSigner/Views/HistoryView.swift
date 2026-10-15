@@ -143,10 +143,24 @@ struct HistoryDetailView: View {
         return (record.network == "testnet" ? "https://testnet.nearblocks.io/txns/" : "https://nearblocks.io/txns/") + hash
     }
 
+    private var technicalFields: [DisplayField] {
+        var fields: [DisplayField] = []
+        if let hash = record.hash {
+            fields.append(DisplayField(record.kind == .transaction ? "Transaction hash" : "Signed digest", hash, style: .monospace))
+        }
+        if let signature = record.signature { fields.append(DisplayField("Signature", signature, style: .monospace)) }
+        if let publicKey = record.publicKey { fields.append(DisplayField("Public key", publicKey, style: .monospace)) }
+        fields.append(DisplayField("Derivation path", record.path, style: .monospace))
+        fields.append(DisplayField("Connection", record.transport))
+        return fields
+    }
+
     var body: some View {
         let display = PreparedRequest(record: record)?.display
-        List {
-            Section {
+        // Cards in a scroll view, as on the approval screen, not a List: a List row gives one
+        // touch-and-hold menu to everything in it, so every field would copy the first one.
+        ScrollView {
+            VStack(spacing: 20) {
                 VStack(spacing: 10) {
                     SymbolBadge(symbol: record.displaySymbol, size: 56)
                     DataText(record.title)
@@ -158,121 +172,116 @@ struct HistoryDetailView: View {
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-            }
+                .card()
 
-            Section {
-                if let account = model.accountLabel(for: record) {
-                    LabeledContent("Account", value: account)
+                VStack(spacing: 12) {
+                    if let account = model.accountLabel(for: record) {
+                        DetailRow(label: "Account", value: account)
+                    }
+                    if let signer = record.signerId {
+                        Divider()
+                        DetailRow(label: "From", value: signer)
+                    }
+                    if let receiver = record.receiverId {
+                        Divider()
+                        DetailRow(label: record.kind == .message ? "App" : "To", value: receiver)
+                    }
+                    if let network = record.network {
+                        Divider()
+                        DetailRow(label: "Network", value: network.capitalized)
+                    }
                 }
-                if let signer = record.signerId {
-                    LabeledContent("From", value: signer)
-                }
-                if let receiver = record.receiverId {
-                    LabeledContent(record.kind == .message ? "App" : "To", value: receiver)
-                }
-                if let network = record.network {
-                    LabeledContent("Network", value: network.capitalized)
-                }
-            }
+                .card()
 
-            if let reason = record.failureReason {
-                Section("What Happened") {
-                    DataText(reason).foregroundStyle(record.outcome == .failed ? Color.red : Color.secondary)
+                if let reason = record.failureReason {
+                    DetailGroup("What Happened") {
+                        DataText(reason)
+                            .foregroundStyle(record.outcome == .failed ? Color.red : Color.secondary)
+                            .card()
+                    }
                 }
-            }
 
-            if let display, !display.primarySections.isEmpty {
-                Section("What You Saw") {
-                    VStack(spacing: 12) {
+                if let display, !display.primarySections.isEmpty {
+                    // In the approval screen's order, so it reads as it did then.
+                    DetailGroup("What You Saw") {
+                        ForEach(display.warnings, id: \.self) { warning in
+                            WarningCard(text: warning)
+                        }
                         if let highlight = display.highlight {
                             HighlightCard(highlight: highlight, ownAccount: model.ownAccountLabel(for:))
                         }
                         if !display.extras.isEmpty {
                             SectionCard(section: DisplaySection(title: "Also in this request", fields: display.extras))
                         }
-                        ForEach(display.warnings, id: \.self) { warning in
-                            WarningCard(text: warning)
-                        }
                         if display.highlight == nil {
                             RequestSectionsView(sections: display.primarySections)
                         }
-                    }
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
-                }
-
-                // The card summarizes; every field is one tap away.
-                if display.highlight != nil {
-                    Section {
-                        DisclosureGroup("Details") {
-                            RequestSectionsView(sections: display.primarySections)
-                                .padding(.vertical, 8)
+                        // The card summarizes; every field is one tap away.
+                        if display.highlight != nil {
+                            ExpandableCard(title: "Details") {
+                                RequestSectionsView(sections: display.primarySections)
+                            }
                         }
                     }
                 }
-            }
 
-            Section {
-                DisclosureGroup("Technical details") {
-                    if let hash = record.hash {
-                        TechnicalValue(label: record.kind == .transaction ? "Transaction hash" : "Signed digest", value: hash)
-                    }
-                    if let signature = record.signature {
-                        TechnicalValue(label: "Signature", value: signature)
-                    }
-                    if let publicKey = record.publicKey {
-                        TechnicalValue(label: "Public key", value: publicKey)
-                    }
-                    TechnicalValue(label: "Derivation path", value: record.path)
-                    TechnicalValue(label: "Connection", value: record.transport)
-                    if let display {
-                        // The hash is shown above with a copy button.
-                        let fields = display.technicalSections.flatMap(\.fields)
-                            .filter { $0.label != "Transaction hash" && $0.label != "Signed digest" }
-                        ForEach(Array(fields.enumerated()), id: \.offset) { _, field in
-                            TechnicalValue(label: field.label, value: field.value)
+                ExpandableCard(title: "Technical details") {
+                    // The hash is shown first, from the record.
+                    let fields = technicalFields + (display?.technicalSections.flatMap(\.fields) ?? [])
+                        .filter { $0.label != "Transaction hash" && $0.label != "Signed digest" }
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(Array(fields.enumerated()), id: \.offset) { index, field in
+                            if index > 0 { Divider() }
+                            DisplayFieldView(field: field)
+                        }
+                        if !record.payload.isEmpty {
+                            Divider()
+                            RawPayloadRow(payload: record.payload)
+                        } else if let size = record.payloadSize, size > 0 {
+                            Divider()
+                            Text("The request's bytes (\(NearFormat.byteSize(size))) aren't kept for requests refused without being shown, or for older ones.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
                         }
                     }
-                    if !record.payload.isEmpty {
-                        RawPayloadRow(payload: record.payload)
-                    } else if let size = record.payloadSize, size > 0 {
-                        Text("The request's bytes (\(NearFormat.byteSize(size))) aren't kept for requests refused without being shown, or for older ones.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
+                    .card()
                     Text(ValueMenuHint.text)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 4)
                 }
-            }
 
-            // This phone is meant to stay offline, so the link goes to another device as a QR code.
-            if let explorerLink {
-                Section {
-                    VStack(spacing: 12) {
-                        QRCodeView(value: explorerLink)
-                            .frame(maxWidth: 200)
-                        Text("Scan with another phone's camera to see this transaction on nearblocks.io.")
+                // This phone is meant to stay offline, so the link goes to another device as a QR code.
+                if let explorerLink {
+                    DetailGroup("Check on an Explorer") {
+                        VStack(spacing: 12) {
+                            QRCodeView(value: explorerLink)
+                                .frame(maxWidth: 200)
+                            Text("Scan with another phone's camera to see this transaction on nearblocks.io.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .card()
+                        Text(record.network == nil
+                            ? "It appears once your computer has sent the transaction. The network can't be told from the account names; this link is for mainnet."
+                            : "It appears once your computer has sent the transaction.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 4)
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                } header: {
-                    Text("Check on an Explorer")
-                } footer: {
-                    Text(record.network == nil
-                        ? "It appears once your computer has sent the transaction. The network can't be told from the account names; this link is for mainnet."
-                        : "It appears once your computer has sent the transaction.")
                 }
-            }
 
-            Section {
                 Button("Delete from history", role: .destructive) { confirmDelete = true }
+                    .frame(maxWidth: .infinity)
+                    .card()
             }
+            .padding()
         }
+        .background(Color(uiColor: .systemGroupedBackground))
         .navigationTitle(record.kind.label)
         .navigationBarTitleDisplayMode(.inline)
         .confirmationDialog("Delete this entry?", isPresented: $confirmDelete, titleVisibility: .visible) {
@@ -284,24 +293,41 @@ struct HistoryDetailView: View {
     }
 }
 
-/// A label and value; touch and hold to copy the value or show it as a QR code.
-private struct TechnicalValue: View {
+/// A label and its value on one line; touch and hold to copy the value.
+private struct DetailRow: View {
     let label: String
     let value: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        HStack(alignment: .firstTextBaseline) {
             Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            Spacer(minLength: 12)
             DataText(value)
-                .font(.footnote.monospaced())
-                .lineLimit(8)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.trailing)
+                .valueMenu(value, title: label)
         }
-        .padding(.vertical, 2)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
-        .valueMenu(value, title: label)
+    }
+}
+
+/// Cards under a heading, like a grouped list's section.
+private struct DetailGroup<Content: View>: View {
+    let title: String
+    @ViewBuilder let content: Content
+
+    init(_ title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 4)
+            content
+        }
     }
 }
 
@@ -325,7 +351,7 @@ private struct RawPayloadRow: View {
         .padding(.vertical, 2)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
-        .modifier(ValueMenu(value: { payload.base64EncodedString() },
+        .modifier(ValueMenu(value: { payload.base64EncodedString() }, isLong: true,
                             fitsQRCode: (payload.count + 2) / 3 * 4 <= QRCode.capacity, title: "Raw request"))
     }
 }
