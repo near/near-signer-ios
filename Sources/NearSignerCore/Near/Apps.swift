@@ -759,6 +759,12 @@ enum Recognizers {
         if let callbackUrl = payload.callbackUrl {
             overviewFields.append(DisplayField("Callback URL", callbackUrl, style: .monospace))
         }
+        // No intents: apps ask for this to check that you control the account (signing in). Run on
+        // chain, it does nothing.
+        if intents.isEmpty, unknownFields.isEmpty {
+            overviewFields.insert(DisplayField("What it does", "Proves to \(venue) that you control \(signer). It moves no tokens and changes nothing."),
+                                  at: 0)
+        }
         let overview = DisplaySection(title: venue, fields: overviewFields)
         let details = DisplaySection(title: "Details", fields: [
             DisplayField("Nonce", payload.nonce.base64EncodedString(), style: .monospace),
@@ -768,8 +774,8 @@ enum Recognizers {
         // The card spells out what the intents do, so the signature itself needs no warning.
         warnings += unknownTokenWarnings(amounts)
         return Recognized(
-            title: single?.title ?? "Sign \(intents.count) intents for \(venue)",
-            symbol: single?.symbol ?? .multiple,
+            title: single?.title ?? (intents.isEmpty ? "Sign in to \(venue)" : "Sign \(intents.count) intents for \(venue)"),
+            symbol: single?.symbol ?? (intents.isEmpty ? .message : .multiple),
             highlight: single?.highlight,
             sections: [overview] + sections + [details],
             warnings: warnings)
@@ -777,11 +783,10 @@ enum Recognizers {
 
     // MARK: Helpers
 
-    /// Parses a JSON object. Nil if the JSON has duplicate keys anywhere (parsers disagree on
-    /// which value wins, so the summary could show a different value than the contract reads) or
-    /// is something only Foundation accepts, such as a trailing comma.
+    /// Parses a JSON object. Nil if the JSON has duplicate keys anywhere: parsers disagree on
+    /// which value wins, so the summary could show a different value than the contract reads.
     static func json(_ data: Data) -> [String: Any]? {
-        guard JSONInspector.isStrict(data), let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               !JSONInspector.hasDuplicateKeys(data) else { return nil }
         return object
     }
@@ -797,11 +802,8 @@ enum Recognizers {
         NearFormat.arguments(data).hasSuffix("the hash covers all bytes)")
     }
 
-    /// Parsed JSON shown in the same layout as raw JSON (`NearFormat.json`), keys sorted.
     static func prettyJSON(_ value: Any) -> String {
-        guard JSONSerialization.isValidJSONObject(value),
-              let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys, .withoutEscapingSlashes]),
-              let text = NearFormat.json(data) else { return "\(value)" }
+        guard JSONSerialization.isValidJSONObject(value), let text = NearFormat.json(object: value) else { return "\(value)" }
         return text
     }
 

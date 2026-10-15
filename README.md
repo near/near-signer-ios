@@ -172,9 +172,8 @@ public keys are decoded and displayed, but the device itself signs with ed25519.
   truncated, and thousands are grouped with a narrow space, which no locale reads as a decimal point.
   Account ids, keys and token ids that wrap break at any character: iOS 26 would otherwise hyphenate
   them and show a "-" they don't have. Copying gives the exact value. JSON (arguments, a `msg`, a
-  signed message, a DAO proposal) is laid out the same way everywhere, one entry per line, with key
-  order, strings and numbers exactly as sent. Text that isn't strict JSON, as contracts read it (a
-  trailing comma, say), is shown as sent, and no summary is built from it.
+  signed message, a DAO proposal) is laid out the same way everywhere, keys sorted. Text that isn't
+  JSON, or JSON that repeats a key, is shown exactly as sent.
 - **NEAR keys only.** Paths must be 5 hardened levels under `44'/397'`, so a host cannot use the
   seed's keys for other chains.
 - **Key check.** If the transaction's `public_key` is not this device's key at the requested path,
@@ -295,7 +294,7 @@ are cut at four lines, so a long one can't push the rest out of view.
 | Wrapped NEAR | `near_deposit`, `near_withdraw` on `wrap.near` / `wrap.testnet` | wrap or unwrap amount |
 | NEAR Intents deposit | `ft_transfer_call` to `intents.near` or `intents.far` (also after `near_deposit`) | amount, credited account |
 | NEAR Intents on chain | `ft_withdraw`, `mt_transfer`, `add_public_key`, `remove_public_key` on `intents.near` or `intents.far` | withdrawal, transfer, key change |
-| NEAR Intents signed message | NEP-413 message with `signer_id`, `deadline`, `intents` (`token_diff`, `transfer`, `ft_withdraw`, `native_withdraw`, key changes; others shown raw) | swap card (you pay / you receive), deadline |
+| NEAR Intents signed message | NEP-413 message with `signer_id`, `deadline`, `intents` (`token_diff`, `transfer`, `ft_withdraw`, `native_withdraw`, key changes; others shown raw) | swap card (you pay / you receive), deadline; with no intents, "Sign in to NEAR Intents" (apps use it to check you control the account) |
 | Sputnik DAO | `add_proposal` (every v2 proposal kind, function-call payloads decoded) and `act_proposal` (votes, finalize) | DAO, what the proposal does (amounts, recipients, calls with their arguments), description, bond, vote; for a vote the proposal comes from the website, so the card marks it unverified (tap the mark for why) |
 
 Transfer cards show the recipient's full account id, implicit ids (64 hex characters, or `0x…`)

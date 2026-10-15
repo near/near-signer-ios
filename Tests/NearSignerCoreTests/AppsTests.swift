@@ -65,7 +65,7 @@ final class AppsTests: XCTestCase {
         XCTAssertTrue(transferCall.warnings.contains { $0.contains("acts on the message shown") })
         // The message decides where the tokens go, so the card shows it.
         guard case let .tokenMove(called)? = transferCall.highlight else { return XCTFail("expected a card") }
-        XCTAssertEqual(called.message, "{\n  \"actions\": []\n}")
+        XCTAssertEqual(called.message, NearFormat.message(#"{"actions":[]}"#))
 
         // Something else on a token contract is not dressed up.
         let other = try display(receiver: usdc, [call("ft_balance_of", #"{"account_id":"bob.near"}"#)])
@@ -163,8 +163,7 @@ final class AppsTests: XCTestCase {
         XCTAssertFalse(addKey.warnings.isEmpty)
     }
 
-    /// Every place that shows JSON lays it out the same way, keeping the bytes' key order and
-    /// literals; anything that isn't JSON is shown exactly as sent.
+    /// Every place that shows JSON lays it out the same way; anything else is shown exactly as sent.
     func testMessagesUseOneJSONLayout() throws {
         // near-cli-rs `send-ft-call … msg-file`: the file's own indents and final newline are sent.
         let file = """
@@ -180,51 +179,23 @@ final class AppsTests: XCTestCase {
             methodName: "ft_transfer_call", args: args, gas: 30_000_000_000_000, deposit: U128(1)))])
         let laidOut = """
             {
-              "recipient": "sol:DuSs7rCr7oTLHjM29QQ8NwDViaahTU58qqxaJVyAkgbn",
-              "fee": "0",
-              "native_token_fee": "1890359168422986659909"
+              "fee" : "0",
+              "native_token_fee" : "1890359168422986659909",
+              "recipient" : "sol:DuSs7rCr7oTLHjM29QQ8NwDViaahTU58qqxaJVyAkgbn"
             }
             """
         XCTAssertEqual(try move(bridge).message, laidOut)
         XCTAssertTrue(bridge.sections.flatMap(\.fields).contains { $0.label == "Message to the recipient" && $0.value == laidOut })
 
-        // Function call arguments, DAO proposal details and signed messages share the layout.
-        XCTAssertEqual(NearFormat.arguments(Data(#"{"b":[],"a":{},"c":[1,{"d":"x\",y:{"}]}"#.utf8)), """
-            {
-              "b": [],
-              "a": {},
-              "c": [
-                1,
-                {
-                  "d": "x\\",y:{"
-                }
-              ]
-            }
-            """)
-        XCTAssertEqual(Recognizers.prettyJSON(["url": "https://a/b", "n": 1]), "{\n  \"n\": 1,\n  \"url\": \"https://a/b\"\n}")
+        // Signed messages and DAO proposal details share the layout.
         let signIn = try PreparedRequest(kind: .nep413, payload: NEP413Payload(
-            message: #"{"action":"login","n":1}"#, nonce: Data(repeating: 2, count: 32), recipient: "app.near", callbackUrl: nil).borsh).display
-        XCTAssertTrue(signIn.sections.flatMap(\.fields).contains { $0.value == "{\n  \"action\": \"login\",\n  \"n\": 1\n}" })
+            message: #"{"n":1,"action":"login"}"#, nonce: Data(repeating: 2, count: 32), recipient: "app.near", callbackUrl: nil).borsh).display
+        XCTAssertTrue(signIn.sections.flatMap(\.fields).contains { $0.value == "{\n  \"action\" : \"login\",\n  \"n\" : 1\n}" })
+        XCTAssertEqual(Recognizers.prettyJSON(["url": "https://a/b"]), "{\n  \"url\" : \"https://a/b\"\n}")
 
-        // Nothing is rounded, reordered or merged: big numbers, escapes and a repeated key stay.
-        XCTAssertEqual(NearFormat.json(Data(#"{"z":123456789012345678901234567890,"f":1.10,"s":"\u0041\/","z":2}"#.utf8)),
-                       "{\n  \"z\": 123456789012345678901234567890,\n  \"f\": 1.10,\n  \"s\": \"\\u0041\\/\",\n  \"z\": 2\n}")
-        // Not JSON (or not UTF-8 JSON): the text exactly as sent, spaces included.
+        // Not JSON, or JSON that repeats a key (the layout would drop a value): exactly as sent.
         XCTAssertEqual(NearFormat.message(" alice.near\n"), " alice.near\n")
-        XCTAssertEqual(NearFormat.message(#"{"a": 1,}"#), #"{"a": 1,}"#)
-        XCTAssertNil(NearFormat.json(try XCTUnwrap(#"{"a":1}"#.data(using: .utf16LittleEndian))))
-        // Strict, as serde_json reads it: Foundation accepts the first two, contracts don't.
-        for loose in [#"[1,2,]"#, "\u{FEFF}[1]", "[01]", "[1.]", #"["\ud800"]"#, #"["\udc00"]"#, #"["\u+123"]"#, "[\"a\tb\"]", "[1] x",
-                      String(repeating: "[", count: 129) + String(repeating: "]", count: 129)] {
-            XCTAssertNil(NearFormat.json(Data(loose.utf8)), loose)
-        }
-        for strict in [#"["\ud83d\ude00"]"#, "-0.5e+3", "null", String(repeating: "[", count: 128) + String(repeating: "]", count: 128)] {
-            XCTAssertNotNil(NearFormat.json(Data(strict.utf8)), strict)
-        }
-        // A summary is never built from JSON the contract would refuse.
-        let trailing = try display(receiver: usdc, [call("ft_transfer", #"{"receiver_id":"bob.near","amount":"1",}"#)])
-        XCTAssertNil(trailing.highlight)
-        XCTAssertTrue(trailing.sections.flatMap(\.fields).contains { $0.value == #"text: {"receiver_id":"bob.near","amount":"1",}"# })
+        XCTAssertEqual(NearFormat.message(#"{"to":"bob.near","to":"eve.near"}"#), #"{"to":"bob.near","to":"eve.near"}"#)
 
         // The card's copy is sanitized like every other field.
         let hidden = try display(receiver: usdc, [call("ft_transfer_call", #"{"receiver_id":"bob.near","amount":"1","msg":"pay\u202Eevil"}"#)])
@@ -312,6 +283,14 @@ final class AppsTests: XCTestCase {
         XCTAssertEqual(several.title, "Sign 2 intents for NEAR Intents")
         XCTAssertNil(several.highlight)
         XCTAssertTrue(several.warnings.contains { $0.contains("full control") })
+
+        // No intents: the app checks that you control the account.
+        let signIn = try sign(#"{"signer_id":"frol.near","deadline":"2026-10-15T01:00:00Z","intents":[]}"#)
+        XCTAssertEqual(signIn.title, "Sign in to NEAR Intents")
+        XCTAssertEqual(signIn.symbol, .message)
+        XCTAssertTrue(signIn.warnings.isEmpty)
+        XCTAssertEqual(signIn.primarySections.first?.fields.first?.value,
+                       "Proves to NEAR Intents that you control frol.near. It moves no tokens and changes nothing.")
 
         // Anything else stays a plain message, as do intents for another contract.
         let elsewhere = try PreparedRequest(kind: .nep413, payload: NEP413Payload(

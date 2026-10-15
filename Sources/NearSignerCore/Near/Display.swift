@@ -301,8 +301,8 @@ public enum NearFormat {
         DisplayField("Deposit", near(deposit), style: deposit > U128(1) ? .amount : .text)
     }
 
-    /// Function call arguments: laid out by `json` if they are JSON, otherwise the text or, for
-    /// binary data, base64.
+    /// Function call arguments: JSON laid out by `json`, otherwise the text or, for binary data,
+    /// base64.
     public static func arguments(_ data: Data, limit: Int = 16_000) -> String {
         if data.isEmpty { return "(none)" }
         if let text = json(data) {
@@ -315,20 +315,25 @@ public enum NearFormat {
         return truncated("base64: " + data.base64EncodedString(), limit: limit, totalBytes: data.count)
     }
 
-    /// A message for a contract (`msg`) or a signed message: laid out by `json` if it is JSON,
-    /// otherwise exactly as sent.
+    /// A message for a contract (`msg`) or a signed message: JSON laid out by `json`, otherwise
+    /// exactly as sent.
     public static func message(_ text: String, limit: Int = 16_000) -> String {
         let data = Data(text.utf8)
         return truncated(json(data) ?? text, limit: limit, totalBytes: data.count)
     }
 
-    /// The one JSON layout used wherever a request shows JSON: one entry per line, two-space
-    /// indents, `"key": value`, empty objects and arrays as `{}` and `[]`. Only whitespace between
-    /// tokens changes: key order, strings (escapes included) and numbers stay exactly as sent, so
-    /// nothing is rounded, reordered or merged (a repeated key shows twice). Nil unless `data` is
-    /// JSON as contracts read it (`JSONInspector.isStrict`): a trailing comma, say, is shown as sent.
+    /// The JSON layout every screen uses: Foundation's pretty printing, keys sorted. Nil if `data`
+    /// isn't JSON, or repeats a key (the layout would keep only one of the values).
     public static func json(_ data: Data) -> String? {
-        JSONInspector.layout(data)
+        guard let object = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]),
+              !JSONInspector.hasDuplicateKeys(data) else { return nil }
+        return json(object: object)
+    }
+
+    static func json(object: Any) -> String? {
+        let options: JSONSerialization.WritingOptions = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes, .fragmentsAllowed]
+        guard let data = try? JSONSerialization.data(withJSONObject: object, options: options) else { return nil }
+        return String(decoding: data, as: UTF8.self)
     }
 
     private static func truncated(_ text: String, limit: Int, totalBytes: Int) -> String {

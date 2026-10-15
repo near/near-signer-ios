@@ -57,7 +57,7 @@ final class TransactionTests: XCTestCase {
         XCTAssertEqual(action.deposit, U128(1))
         XCTAssertEqual(callDisplay.title, "Send usdc.testnet tokens to bob.testnet")
         XCTAssertTrue(callDisplay.text.contains("1000000 raw token units → bob.testnet"))
-        XCTAssertTrue(callDisplay.text.contains("\"receiver_id\": \"bob.testnet\""))
+        XCTAssertTrue(callDisplay.text.contains("\"receiver_id\" : \"bob.testnet\""))
 
         let (_, binaryDisplay) = try load("functionCallBinary")
         XCTAssertTrue(binaryDisplay.text.contains("base64: AQID/w=="))
