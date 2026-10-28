@@ -66,8 +66,10 @@ final class OpticalTests: XCTestCase {
             XCTAssertFalse(indexes.isEmpty)
         }
         // Ideal soliton: about half the mixed frames (odd blocks) have degree 2.
-        let degrees = (300..<20100).filter { ($0 / 300) % 2 == 1 }
-            .map { Fountain.indexes(sessionId: 1, sequence: UInt32($0), fragmentCount: 300).count }
+        var degrees: [Int] = []
+        for sequence in UInt32(300)..<UInt32(20100) where (sequence / 300) % 2 == 1 {
+            degrees.append(Fountain.indexes(sessionId: 1, sequence: sequence, fragmentCount: 300).count)
+        }
         XCTAssertEqual(degrees.count, 9900)
         let twos = degrees.filter { $0 == 2 }.count
         XCTAssertTrue((4455...5445).contains(twos), "\(twos) of 9 900 mixed frames have degree 2")
