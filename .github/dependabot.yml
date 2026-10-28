@@ -11,3 +11,15 @@ updates:
     groups:
       github-actions:
         patterns: ["*"]
+  - package-ecosystem: cargo
+    directory: /host/rust/near-signer-qr
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14
+  - package-ecosystem: npm
+    directory: /host/optical
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14

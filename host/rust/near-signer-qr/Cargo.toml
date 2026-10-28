@@ -1,0 +1,22 @@
+[package]
+name = "near-signer-qr"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT"
+description = "Shows NEAR Signer requests as QR codes in a terminal and reads the answer"
+repository = "https://github.com/Near-One/near-signer"
+keywords = ["near", "qr", "hardware-wallet", "signing"]
+categories = ["command-line-utilities", "cryptography::cryptocurrencies"]
+
+[dependencies]
+crc32fast = "1"
+ed25519-dalek = { version = "2", default-features = false }
+flate2 = "1"
+libc = "0.2"
+qrcode = { version = "0.14", default-features = false }
+sha2 = { version = "0.10", default-features = false }
+
+[[bin]]
+name = "near-signer-qr"
+path = "src/main.rs"

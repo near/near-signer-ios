@@ -63,6 +63,78 @@ jobs:
       - name: Compare with the committed fixtures
         run: git diff --exit-code -- Tests/NearSignerCoreTests/Fixtures.swift host/python/test_fixtures.json
 
+  # The camera transfer's JavaScript (host/optical): the codec and CLI, the browser page and the
+  # near-connect executor. Lint, unit tests, and the committed executor bundle must match a
+  # fresh build. The browser tests stay manual (they need Chromium and testnet).
+  javascript:
+    name: Camera-transfer JavaScript
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+        working-directory: host/optical
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: host/optical/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - name: Rebuild the executor bundle and the camera page
+        run: npm run build
+      - name: Compare with the committed files
+        run: git diff --exit-code -- near-signer-qr-executor.js near-signer-qr-camera.html
+
+  # The Rust crate for near-cli-rs (host/rust/near-signer-qr): the third implementation of the
+  # camera transfer, published to crates.io. The runner's own Rust toolchain; the pipe checks it
+  # against the JavaScript sender frame for frame.
+  rust:
+    name: Rust camera-transfer crate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      CARGO_TERM_COLOR: always
+      MANIFEST: host/rust/near-signer-qr/Cargo.toml
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            host/rust/near-signer-qr/target
+          key: cargo-${{ hashFiles('host/rust/near-signer-qr/Cargo.lock') }}
+      - run: cargo --version
+      - run: cargo fmt --check --manifest-path "$MANIFEST"
+      - run: cargo clippy --all-targets --manifest-path "$MANIFEST" -- -D warnings
+      - run: cargo test --manifest-path "$MANIFEST"
+      - name: Package as for crates.io
+        run: cargo publish --dry-run --manifest-path "$MANIFEST"
+      - name: Build on the minimum Rust (rust-version in Cargo.toml)
+        run: |
+          msrv="$(sed -n 's/^rust-version = "\(.*\)"/\1/p' "$MANIFEST")"
+          rustup toolchain install "$msrv" --profile minimal
+          cargo "+$msrv" check --all-targets --manifest-path "$MANIFEST"
+      - name: Node sender -> Rust receiver
+        run: |
+          tx="DQAAAGFsaWNlLnRlc3RuZXQAxXHjPi42wsco1hfqd6iOIyDIaX6si0Y638ASi5aCXL8HAAAAAAAAAAsAAABib2IudGVzdG5ldDlKvrNecHYJ3o9ztj1DvRo3b/5nk1yqaJN90pvATmc8AQAAAAMAAIBxZDO2KaM9AQAAAAAA"
+          node host/optical/near-signer-qr.mjs sign-tx --tx "$tx" --frames-out 60 --loss 0.3 --shuffle --session-id 0badcafe --seed 7 \
+            | cargo run --quiet --manifest-path "$MANIFEST" -- receive | tee received.json
+          grep -q "\"path\": \"m/44'/397'/0'/0'/1'\"" received.json
+          grep -q "\"payload\": \"$tx\"" received.json
+      - name: Rust sender -> Node receiver (frames are identical)
+        # Uncompressed: the two DEFLATE implementations may pack the same bytes differently.
+        run: |
+          tx="DQAAAGFsaWNlLnRlc3RuZXQAxXHjPi42wsco1hfqd6iOIyDIaX6si0Y638ASi5aCXL8HAAAAAAAAAAsAAABib2IudGVzdG5ldDlKvrNecHYJ3o9ztj1DvRo3b/5nk1yqaJN90pvATmc8AQAAAAMAAIBxZDO2KaM9AQAAAAAA"
+          diff <(cargo run --quiet --manifest-path "$MANIFEST" -- sign-tx --tx "$tx" --no-compress --frames-out 30 --session-id 0badcafe --fragment-size 50) \
+               <(node host/optical/near-signer-qr.mjs sign-tx --tx "$tx" --no-compress --frames-out 30 --session-id 0badcafe --fragment-size 50)
+
   # Swift unit tests, the Python host against near-signer-sim, and near-connect's Ledger executor
   # over emulated BLE: everything scripts/test-all.sh runs. On Linux the core signs with
   # swift-crypto, on macOS with CryptoKit.

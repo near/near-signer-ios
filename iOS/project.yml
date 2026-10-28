@@ -29,6 +29,7 @@ targets:
         INFOPLIST_KEY_CFBundleDisplayName: NEAR Signer
         INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
         INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription: NEAR Signer receives transactions to sign from your computer over Bluetooth.
+        INFOPLIST_KEY_NSCameraUsageDescription: NEAR Signer scans the QR codes your computer shows, to receive a request without Bluetooth.
         INFOPLIST_KEY_NSFaceIDUsageDescription: "Face ID protects your NEAR key: every signature requires it."
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES

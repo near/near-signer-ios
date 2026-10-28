@@ -32,4 +32,7 @@ node_modules/
 /package.json
 /package-lock.json
 
+# Rust (host/rust/near-signer-qr)
+target/
+
 .DS_Store

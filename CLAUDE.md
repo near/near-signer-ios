@@ -15,13 +15,23 @@ changing behavior.
 - `host/python/`: `near-signer-host` CLI and end-to-end tests. Standard library only (`bleak` for
   Bluetooth).
 - `host/compat/`: runs near-connect's real Ledger executor against the simulator.
+- `host/optical/`: the computer side of the camera transfer (QR codes): dependency-free codec,
+  terminal CLI, browser page, and the near-connect executor and its camera page built from them
+  (the browser side vendors a QR generator and the jsQR reader). The wire format is in README
+  "Camera transfer".
+- `host/rust/near-signer-qr/`: the same in Rust (a crate for near-cli-rs, plus a binary with the
+  JavaScript CLI's commands). The three implementations must stay byte for byte compatible;
+  `cargo test` holds shared vectors and CI pipes the JavaScript frames into the Rust receiver.
 
 ## Commands
 
-- `scripts/test-all.sh`: every test that needs no phone (Swift, Python e2e, near-connect). Needs
-  Swift, python3 and Node.js.
+- `scripts/test-all.sh`: every test that needs no phone (Swift, Python e2e, near-connect, the
+  camera transfer through `near-signer-sim optical` from the JavaScript and, when cargo is
+  installed, the Rust sender). Needs Swift, python3 and Node.js; Rust is optional.
 - `scripts/format.sh` formats; `scripts/format.sh --check` is the CI gate (SwiftFormat 0.63.0,
-  Ruff 0.16.9, Prettier 3.9.9, ShellCheck).
+  Ruff 0.16.9, Prettier 3.9.9, ESLint from `host/optical/package.json`, ShellCheck).
+- In `host/optical`: `npm run lint`, `npm test` (the codec's unit tests), `npm run build`
+  (rebuilds the committed `near-signer-qr-executor.js`; CI fails if it differs).
 - `scripts/regenerate-fixtures.sh`: rebuilds `Tests/NearSignerCoreTests/Fixtures.swift` and
   `host/python/test_fixtures.json` from near-api-js. Never edit those files by hand; CI checks
   they match.

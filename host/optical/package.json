@@ -1,0 +1,16 @@
+{
+  "name": "near-signer-optical",
+  "private": true,
+  "description": "The computer side of NEAR Signer's camera transfer: codec, terminal CLI, browser page, the near-connect executor and its camera page. No runtime dependencies; the dev dependencies lint it.",
+  "license": "MIT",
+  "scripts": {
+    "lint": "eslint .",
+    "test": "node --test test_optical.mjs",
+    "build": "node ../../scripts/build-optical-executor.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "eslint": "10.12.0",
+    "globals": "17.12.0"
+  }
+}

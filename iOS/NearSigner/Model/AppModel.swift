@@ -54,6 +54,23 @@ final class AppModel {
     private(set) var isSceneActive = false
     var errorMessage: String?
 
+    // Camera transfer (README "Camera transfer"): a request scanned from a computer's screen.
+    enum CameraTransfer: Equatable {
+        /// The scan screen is open; progress once the first frame of a request was seen.
+        case scanning(OpticalProgress?)
+        /// The request is with the signer: the approval screen is up, or the key is being unlocked.
+        case processing
+        /// The answer, shown as one QR code until Done.
+        case response(OpticalResponse)
+    }
+
+    private(set) var cameraTransfer: CameraTransfer?
+    /// Bytes per second of the transfer in progress, once it can be told.
+    private(set) var cameraSpeed: Double?
+    let cameraScanner = CameraScanner()
+    @ObservationIgnored private let cameraReceiver = OpticalReceiver()
+    @ObservationIgnored private var cameraStartedAt: Date?
+
     // Settings (persisted)
     private(set) var appearance: AppAppearance
     private(set) var bluetoothEnabled: Bool
@@ -215,6 +232,9 @@ final class AppModel {
             transports.stop()
             endReceiving()
             if let pending = pendingRequest { resolve(pending.id, approved: false) }
+            // The camera stops too; a request already with the signer was just rejected above, and
+            // its outcome closes the transfer. An answer on screen stays, behind the lock screen.
+            if case .scanning = cameraTransfer { cancelCameraTransfer() }
             lock()
         }
     }
@@ -707,6 +727,88 @@ final class AppModel {
         Task {
             try? await historyStore.clear()
             await reloadHistory()
+        }
+    }
+
+    // MARK: Camera transfer
+
+    /// Opens the camera; frames arrive through `cameraSaw`.
+    func startCameraTransfer() {
+        cameraReceiver.reset()
+        cameraStartedAt = nil
+        cameraSpeed = nil
+        cameraTransfer = .scanning(nil)
+        cameraScanner.onCode = { [weak self] text in self?.cameraSaw(text) }
+        let scanner = cameraScanner
+        Task { await scanner.start() }
+    }
+
+    /// Done, Cancel, or the scan screen closed. A request already with the signer keeps going:
+    /// its approval screen is the way to reject it.
+    func cancelCameraTransfer() {
+        cameraScanner.stop()
+        cameraScanner.onCode = nil
+        cameraReceiver.reset()
+        cameraTransfer = nil
+        cameraSpeed = nil
+    }
+
+    /// One QR code the camera saw. Most are repeats or frames of a request still arriving.
+    func cameraSaw(_ text: String) {
+        guard case .scanning = cameraTransfer else { return }
+        switch cameraReceiver.receive(text) {
+        case .notAFrame, .duplicate, .otherSession:
+            return
+        case let .invalid(message):
+            // Keep scanning: the computer keeps showing the codes, and the receiver started over.
+            if errorMessage == nil { errorMessage = message }
+            cameraStartedAt = nil
+            cameraSpeed = nil
+            cameraTransfer = .scanning(nil)
+        case let .progress(progress):
+            let now = Date()
+            if let startedAt = cameraStartedAt, progress.total > 0 {
+                let elapsed = now.timeIntervalSince(startedAt)
+                let bytes = Double(progress.length) * Double(progress.known) / Double(progress.total)
+                if elapsed > 0.5 { cameraSpeed = bytes / elapsed }
+            } else {
+                cameraStartedAt = now
+            }
+            cameraTransfer = .scanning(progress)
+        case let .complete(message):
+            let sessionId = cameraReceiver.sessionId ?? 0
+            cameraScanner.stop()
+            guard let request = OpticalRequest(message: message) else {
+                errorMessage = "This code isn't a NEAR Signer request."
+                startCameraTransfer()
+                return
+            }
+            cameraTransfer = .processing
+            cameraSpeed = nil
+            // The same path as a Bluetooth request from here: decode, show, approve, unlock, sign.
+            let service = self.service!
+            Task.detached { [weak self] in
+                let result: Result<Data, StatusWord>
+                if let kind = request.signKind {
+                    result = await service.sign(kind: kind, path: request.path, payload: request.payload, transport: "Camera")
+                } else {
+                    result = await service.publicKey(path: request.path, display: true, transport: "Camera")
+                }
+                await self?.cameraFinished(sessionId: sessionId, result)
+            }
+        }
+    }
+
+    private func cameraFinished(sessionId: UInt32, _ result: Result<Data, StatusWord>) {
+        guard cameraTransfer == .processing else { return }
+        switch result {
+        case let .success(data):
+            cameraTransfer = .response(OpticalResponse(sessionId: sessionId, status: .ok, result: data))
+        case .failure(.userRejected):
+            // Whoever rejected it is at the computer; the last-result card says so.
+            cameraTransfer = nil
+        case let .failure(status):
+            cameraTransfer = .response(OpticalResponse(sessionId: sessionId, status: status, result: Data()))
         }
     }
 

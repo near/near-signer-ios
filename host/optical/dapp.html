@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NEAR Signer in a near-connect dapp</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #0d0d10; color: #e8e8ec; font: 15px/1.5 -apple-system, system-ui, sans-serif; }
+  main { max-width: 560px; margin: 0 auto; padding: 24px 16px; }
+  h1 { font-size: 20px; margin: 0 0 6px; }
+  p { color: #b8b8c4; margin: 6px 0; }
+  button { font: inherit; padding: 9px 14px; border-radius: 10px; border: 1px solid #3a3a46; background: #1c1c24; color: #e8e8ec; cursor: pointer; margin: 6px 6px 0 0; }
+  button.primary { background: #3fb68b; border-color: #3fb68b; color: #06120d; font-weight: 600; }
+  select { font: inherit; padding: 8px; border-radius: 8px; background: #1c1c24; color: #e8e8ec; border: 1px solid #3a3a46; }
+  pre { background: #15151b; border: 1px solid #2a2a33; border-radius: 10px; padding: 12px; white-space: pre-wrap; word-break: break-all; font-size: 13px; }
+  .row { margin-top: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>NEAR Signer in a near-connect dapp</h1>
+  <p>A minimal dapp using <code>@hot-labs/near-connect</code> with the NEAR Signer camera executor
+    registered as a debug wallet. Serve this folder over http://localhost (the executor is loaded
+    from <code>./near-signer-qr-executor.js</code>) and have the app open on the phone.</p>
+
+  <div class="row">
+    <label>Network <select id="network"><option value="testnet" selected>testnet</option><option value="mainnet">mainnet</option></select></label>
+    <button id="connect" class="primary">Connect</button>
+    <button id="disconnect">Disconnect</button>
+  </div>
+  <div class="row">
+    <button id="sign-message">Sign a message</button>
+    <button id="send">Send 0.1 NEAR to myself</button>
+  </div>
+  <div class="row">
+    <label>Contract size <select id="size"><option value="30000">30 KB</option><option value="120000" selected>120 KB</option><option value="300000">300 KB</option></select></label>
+    <button id="deploy">Sign a contract deployment (not sent)</button>
+  </div>
+  <p>The deployment is a delegate action with contract-like bytes (about three times compressible, as wasm is), signed on the phone and returned here, never sent: it shows a request of many QR codes.</p>
+  <pre id="log">Not connected.</pre>
+</main>
+<script type="module">
+  import { NearConnector } from "https://esm.sh/@hot-labs/near-connect@0.11.4";
+
+  const $ = (id) => document.getElementById(id);
+  const log = (...parts) => {
+    $("log").textContent = parts.map((p) => (typeof p === "string" ? p : JSON.stringify(p, null, 2))).join("\n");
+  };
+
+  // The executor served next to this page; near-connect fetches it fresh on every connection.
+  const manifest = {
+    id: "near-signer-qr",
+    name: "NEAR Signer",
+    icon: new URL("./icon.svg", location.href).href,
+    description: "An iPhone as a hardware wallet, through QR codes: no Bluetooth, no USB.",
+    website: "https://github.com/Near-One/near-signer",
+    version: "1.0.0",
+    executor: new URL("./near-signer-qr-executor.js", location.href).href,
+    type: "sandbox",
+    platform: {},
+    features: {
+      signMessage: true,
+      signInWithoutAddKey: true,
+      signInAndSignMessage: true,
+      signInWithFunctionCallKey: true,
+      signAndSendTransaction: true,
+      signAndSendTransactions: true,
+      signDelegateActions: true,
+      mainnet: true,
+      testnet: true,
+    },
+    // The camera page the executor opens to read the phone's answer, served next to it.
+    permissions: { storage: true, allowsOpen: [new URL("./near-signer-qr-camera.html", location.href).href] },
+  };
+
+  let connector;
+  let accountId = null;
+
+  async function setUp() {
+    connector = new NearConnector({ network: $("network").value });
+    window.nearConnector = connector; // for the console and the repository's browser tests
+    await connector.whenManifestLoaded;
+    // Debug wallets persist in the browser, and near-connect loads them a moment after the
+    // manifest; the copy stored on an earlier visit goes, and this manifest takes its place.
+    const started = Date.now();
+    while (!connector.wallets.some((wallet) => wallet.manifest.id === manifest.id) && Date.now() - started < 600) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    await connector.removeDebugWallet(manifest.id);
+    await connector.registerDebugWallet(manifest);
+    const registered = connector.wallets.find((wallet) => wallet.manifest.id === manifest.id)?.manifest;
+    log(`${registered?.name} registered; camera page: ${registered?.permissions?.allowsOpen?.[0] ?? "none"}.`, "Not connected.");
+    connector.on("wallet:signIn", (event) => {
+      accountId = event.accounts[0]?.accountId ?? null;
+      log(`Signed in as ${accountId}`, event.accounts);
+    });
+    connector.on("wallet:signOut", () => {
+      accountId = null;
+      log("Signed out.");
+    });
+    const connected = await connector.getConnectedWallet().catch(() => null);
+    if (connected?.accounts?.length) {
+      accountId = connected.accounts[0].accountId;
+      log(`Still signed in as ${accountId}`);
+    }
+  }
+
+  $("network").addEventListener("change", () => setUp().catch((error) => log(`Error: ${error.message}`)));
+  $("connect").addEventListener("click", async () => {
+    try {
+      log("Choose NEAR Signer in the wallet list…");
+      await connector.connect();
+    } catch (error) {
+      log(`Error: ${error.message}`);
+    }
+  });
+  $("disconnect").addEventListener("click", () => connector.disconnect().catch((error) => log(`Error: ${error.message}`)));
+  $("sign-message").addEventListener("click", async () => {
+    try {
+      const wallet = await connector.wallet();
+      const nonce = crypto.getRandomValues(new Uint8Array(32));
+      const signed = await wallet.signMessage({ message: "Hello from the dapp", recipient: location.host, nonce });
+      log("Signed message:", signed);
+    } catch (error) {
+      log(`Error: ${error.message}`);
+    }
+  });
+  $("send").addEventListener("click", async () => {
+    try {
+      if (!accountId) throw new Error("connect first");
+      const wallet = await connector.wallet();
+      const outcome = await wallet.signAndSendTransaction({
+        receiverId: accountId,
+        actions: [{ type: "Transfer", params: { deposit: "100000000000000000000000" } }],
+      });
+      log("Sent:", outcome);
+    } catch (error) {
+      log(`Error: ${error.message}`);
+    }
+  });
+
+  // Contract-like bytes: seven in ten follow a pattern, the rest carry 6 bits of noise, so they
+  // compress about three times, as wasm does (scripts/make-deploy-tx.mjs makes the suite's).
+  function contractBytes(length) {
+    const code = new Uint8Array(length);
+    let x = 0x1234_5678;
+    for (let i = 0; i < code.length; i++) {
+      x ^= x << 13;
+      x >>>= 0;
+      x ^= x >>> 17;
+      x ^= x << 5;
+      x >>>= 0;
+      code[i] = (x & 0xff) < 180 ? (i * 7) % 251 : (x >>> 8) & 0x3f;
+    }
+    return code;
+  }
+  $("deploy").addEventListener("click", async () => {
+    try {
+      if (!accountId) throw new Error("connect first");
+      const wallet = await connector.wallet();
+      const code = contractBytes(Number($("size").value));
+      const { signedDelegateActions } = await wallet.signDelegateActions({
+        delegateActions: [{ receiverId: accountId, actions: [{ type: "DeployContract", params: { code } }] }],
+      });
+      const [signed] = signedDelegateActions;
+      log(`Signed a deployment of ${code.length} bytes (not sent): ${signed.length} characters of base64, ${signed.slice(0, 48)}…`);
+    } catch (error) {
+      log(`Error: ${error.message}`);
+    }
+  });
+
+  setUp().catch((error) => log(`Error: ${error.message}`));
+</script>
+</body>
+</html>

@@ -11,6 +11,12 @@ struct ConnectGuideView: View {
           --seed-phrase-hd-path "44'/397'/0'/0'/1'" bluetooth send
         """
 
+    private let cliQrExample = """
+        near tokens alice.near send-near bob.near '1 NEAR' \\
+          network-config mainnet sign-with-near-signer-qr \\
+          --seed-phrase-hd-path "44'/397'/0'/0'/1'" send
+        """
+
     var body: some View {
         NavigationStack {
             List {
@@ -29,6 +35,19 @@ struct ConnectGuideView: View {
                     Button("Show the walkthrough") { showIntro = true }
                         .font(.footnote.weight(.semibold))
                         .padding(.top, 4)
+                }
+
+                Section {
+                    GuideStep(number: 1, title: "Show the request as codes",
+                              text: "On your computer, choose \"NEAR Signer\" in a wallet list, or use the NEAR Signer QR tool or its web page. It shows the request as a loop of QR codes.")
+                    GuideStep(number: 2, title: "Tap Scan from computer",
+                              text: "Point this phone's camera at the codes until the request appears. Check it, then approve with Face ID.")
+                    GuideStep(number: 3, title: "Show the answer back",
+                              text: "The phone shows one QR code. Hold it up to your computer's camera, or type the letters under it.")
+                } header: {
+                    Text("Without Bluetooth")
+                } footer: {
+                    Text("The camera only takes pictures in, so the computer can't reach anything on this phone.")
                 }
 
                 Section {
@@ -52,6 +71,11 @@ struct ConnectGuideView: View {
                         Text(cliExample)
                             .font(.caption.monospaced())
                             .valueMenu(cliExample, title: "near-cli-rs example")
+                        Text("Without Bluetooth, a near-cli-rs with sign-with-near-signer-qr shows the codes in the terminal and takes the answer typed:")
+                            .font(.subheadline)
+                        Text(cliQrExample)
+                            .font(.caption.monospaced())
+                            .valueMenu(cliQrExample, title: "near-cli-rs example (QR codes)")
                         Text(ValueMenuHint.text)
                             .font(.footnote)
                             .foregroundStyle(.secondary)

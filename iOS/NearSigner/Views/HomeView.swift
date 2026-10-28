@@ -15,6 +15,7 @@ struct HomeView: View {
         case addAccount
         case guide
         case intro
+        case scan
         case security
         case wallets
 
@@ -28,6 +29,14 @@ struct HomeView: View {
                     ConnectionCard(state: model.connection,
                                    showGuide: { sheet = .guide },
                                    enableBluetooth: { model.setBluetoothEnabled(true) })
+                    // Always offered, as its own row: it is how people who keep Bluetooth off use
+                    // the app (README "Camera transfer").
+                    Button {
+                        model.startCameraTransfer()
+                        sheet = .scan
+                    } label: {
+                        Label("Scan from computer", systemImage: "qrcode.viewfinder")
+                    }
                 }
 
                 if let result = model.lastResult {
@@ -126,6 +135,8 @@ struct HomeView: View {
                     ConnectGuideView()
                 case .intro:
                     ConnectIntroView()
+                case .scan:
+                    ScanView(model: model)
                 case .security:
                     NavigationStack {
                         SecurityView(model: model)
