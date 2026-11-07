@@ -1,13 +1,14 @@
 import SwiftUI
 
 /// Walkthrough for using NEAR Signer from websites. NEAR Signer stands in for a Ledger, so apps
-/// connect through the Ledger option they already have. Shown after the first wallet is added,
-/// and from How to connect.
+/// connect through the Ledger option they already have; without Bluetooth, the request comes in
+/// through the camera as QR codes and the answer goes back as one. Shown after the first wallet
+/// is added, and from How to connect.
 struct ConnectIntroView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var page = 0
 
-    private static let pageCount = 4
+    private static let pageCount = 6
 
     private var isLastPage: Bool { page == ConnectIntroView.pageCount - 1 }
 
@@ -31,7 +32,7 @@ struct ConnectIntroView: View {
         VStack(spacing: 0) {
             TabView(selection: $page) {
                 IntroPage(title: "Your iPhone works as a Ledger",
-                          text: "NEAR apps already support Ledger. NEAR Signer stands in for one over Bluetooth.") {
+                          text: "NEAR apps already support Ledger. NEAR Signer stands in for one over Bluetooth, or through QR codes with the camera.") {
                     LedgerStandInIllustration()
                 }
                 .tag(0)
@@ -53,6 +54,18 @@ struct ConnectIntroView: View {
                     ApprovalIllustration()
                 }
                 .tag(3)
+
+                IntroPage(title: "No Bluetooth? Use the camera",
+                          text: "Choose NEAR Signer on the website, or use the QR tool. The request appears as a loop of codes: tap Scan from computer and point this phone at them.") {
+                    CameraScanIllustration()
+                }
+                .tag(4)
+
+                IntroPage(title: "Show the answer back",
+                          text: "After you approve, this phone shows one QR code. Hold it up to your computer's camera, or type the letters under it.") {
+                    AnswerCodeIllustration()
+                }
+                .tag(5)
             }
             .tabViewStyle(.page(indexDisplayMode: .always))
             .indexViewStyle(.page(backgroundDisplayMode: .always))
@@ -258,6 +271,67 @@ private struct BluetoothChooserIllustration: View {
             }
         }
         .card(padding: 16)
+        .shadow(color: .black.opacity(0.08), radius: 12, y: 4)
+    }
+}
+
+/// The computer's screen with the loop of codes, and this phone reading it.
+private struct CameraScanIllustration: View {
+    var body: some View {
+        HStack(spacing: 14) {
+            VStack(spacing: 8) {
+                HStack(spacing: 6) {
+                    ForEach(0..<2, id: \.self) { _ in
+                        Image(systemName: "qrcode")
+                            .font(.system(size: 30))
+                    }
+                }
+                .foregroundStyle(.black)
+                .padding(10)
+                .background(.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color(uiColor: .separator))
+                }
+                Text("Computer")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            Image(systemName: "camera.viewfinder")
+                .font(.title2)
+                .foregroundStyle(Color.accentColor)
+            VStack(spacing: 8) {
+                AppMark(size: 72)
+                HStack(spacing: 6) {
+                    Image(systemName: "qrcode.viewfinder")
+                    Text("Scan from computer")
+                }
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(Color.accentColor.opacity(0.14), in: Capsule())
+                .foregroundStyle(Color.accentColor)
+                .fixedSize(horizontal: true, vertical: false)
+            }
+        }
+    }
+}
+
+/// A miniature of the answer screen: one code, and the same letters to type.
+private struct AnswerCodeIllustration: View {
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "qrcode")
+                .font(.system(size: 88))
+                .foregroundStyle(.black)
+                .padding(10)
+                .background(.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            Text("080G4 0R4J0 00E1R 70W3G")
+                .font(.callout.monospaced())
+                .foregroundStyle(.secondary)
+        }
+        // The card aligns its content to the leading edge; the picture sits in the middle.
+        .frame(maxWidth: .infinity)
+        .card(padding: 18)
         .shadow(color: .black.opacity(0.08), radius: 12, y: 4)
     }
 }

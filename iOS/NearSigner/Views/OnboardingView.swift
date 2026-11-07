@@ -43,7 +43,7 @@ struct OnboardingView: View {
                         FeatureRow(symbol: "eye.fill", title: "See what you sign",
                                    text: "Every request is shown in plain words before you approve it.")
                         FeatureRow(symbol: "antenna.radiowaves.left.and.right", title: "Works like a Ledger",
-                                   text: "Connects over Bluetooth to NEAR apps and tools that support Ledger.")
+                                   text: "Connects over Bluetooth to NEAR apps and tools that support Ledger, or through QR codes with no radio at all.")
                     }
 
                     if needsPasscode {

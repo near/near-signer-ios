@@ -1,0 +1,119 @@
+<!doctype html>
+<!-- The camera page's markup. scripts/build-optical-executor.mjs replaces the script at the end
+     with jsQR, optical.mjs, scan.mjs and camera.js, and writes host/optical/near-signer-qr-camera.html,
+     the one file to serve next to the executor. See camera.js for what the page does. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>NEAR Signer: the phone's answer</title>
+<style>
+  :root { --bg: #1d1f20; --card: rgba(255, 255, 255, 0.05); --line: rgba(255, 255, 255, 0.15); --text: #fff; --muted: #ada5a4;
+          --accent: #00d4aa; --accent-ink: #06211a; --danger: #ff6b6b; --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1); }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+         display: grid; place-items: center; -webkit-font-smoothing: antialiased; }
+  main { width: min(100%, 520px); padding: 20px 20px 24px; }
+  header { text-align: center; margin-bottom: 14px; }
+  .brand { color: var(--accent); font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; margin: 0 0 6px; }
+  h1 { font-size: 20px; font-weight: 600; margin: 0 0 4px; }
+  .hint { color: var(--muted); font-size: 13.5px; margin: 0; }
+
+  /* The viewfinder: the video fills a 4:3 frame (no reflow when the camera starts), the overlay
+     canvas draws the code's outline, the corners and the sweeping line say "looking". */
+  .frame { position: relative; aspect-ratio: 4 / 3; border-radius: 18px; overflow: hidden; background: #000;
+           box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45), inset 0 0 0 1px var(--line); }
+  .frame video, .frame canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .frame video { object-fit: cover; transition: filter 0.4s var(--ease-out); }
+  .frame.mirror video, .frame.mirror canvas { transform: scaleX(-1); }
+  .viewfinder { position: absolute; inset: 10%; pointer-events: none; }
+  .corner { position: absolute; width: 26px; height: 26px; border: 3px solid rgba(255, 255, 255, 0.85);
+            transition: border-color 0.3s, transform 0.4s var(--ease-out); }
+  .corner.tl { top: 0; left: 0; border-right: 0; border-bottom: 0; border-top-left-radius: 8px; }
+  .corner.tr { top: 0; right: 0; border-left: 0; border-bottom: 0; border-top-right-radius: 8px; }
+  .corner.bl { bottom: 0; left: 0; border-right: 0; border-top: 0; border-bottom-left-radius: 8px; }
+  .corner.br { bottom: 0; right: 0; border-left: 0; border-top: 0; border-bottom-right-radius: 8px; }
+  .scanline { position: absolute; left: 6%; right: 6%; top: 0; height: 2px; border-radius: 2px;
+              background: linear-gradient(90deg, transparent, var(--accent), transparent);
+              box-shadow: 0 0 12px var(--accent); opacity: 0; animation: sweep 2.4s ease-in-out infinite; }
+  .scanning .scanline { opacity: 0.9; }
+  @keyframes sweep { 0% { top: 2%; } 50% { top: 98%; } 100% { top: 2%; } }
+
+  /* Success: the picture dims, the corners turn green and open up, a check draws itself in a
+     badge that pops in, and a ring ripples out. */
+  .done .frame video { filter: brightness(0.3) blur(2px); }
+  .done .corner { border-color: var(--accent); transform: scale(1.15); }
+  .done .scanline { display: none; }
+  .badge { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; opacity: 0; }
+  .done .badge { opacity: 1; animation: pop 0.55s var(--ease-out); }
+  .badge > * { grid-area: 1 / 1; }
+  .badge svg { width: 96px; height: 96px; filter: drop-shadow(0 8px 24px rgba(0, 212, 170, 0.45)); }
+  .badge .disc { fill: var(--accent); }
+  .badge .check { fill: none; stroke: var(--accent-ink); stroke-width: 6; stroke-linecap: round; stroke-linejoin: round;
+                  stroke-dasharray: 48; stroke-dashoffset: 48; }
+  .done .badge .check { animation: draw 0.4s 0.2s ease-out forwards; }
+  .ripple { width: 96px; height: 96px; border-radius: 50%; border: 3px solid var(--accent); opacity: 0; }
+  .done .ripple { animation: ripple 0.9s 0.15s ease-out forwards; }
+  @keyframes pop { 0% { transform: scale(0.6); opacity: 0; } 60% { transform: scale(1.08); opacity: 1; } 100% { transform: scale(1); } }
+  @keyframes draw { to { stroke-dashoffset: 0; } }
+  @keyframes ripple { 0% { transform: scale(1); opacity: 0.8; } 100% { transform: scale(2.6); opacity: 0; } }
+
+  /* A code that was not the answer: a short shake, and the status says what it was. */
+  .shake { animation: shake 0.4s var(--ease-out); }
+  @keyframes shake { 0%, 100% { transform: translateX(0); } 20% { transform: translateX(-7px); } 40% { transform: translateX(6px); }
+                     60% { transform: translateX(-4px); } 80% { transform: translateX(3px); } }
+
+  .status { display: block; margin: 14px auto 0; width: fit-content; max-width: 100%; padding: 7px 14px; border-radius: 999px;
+            background: var(--card); color: var(--muted); font-size: 13.5px; text-align: center; }
+  .status.ok { background: rgba(0, 212, 170, 0.14); color: var(--accent); }
+  .status.bad { background: rgba(255, 107, 107, 0.14); color: var(--danger); }
+  .actions { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-top: 14px; }
+  button { font: inherit; font-size: 14px; padding: 9px 16px; border-radius: 12px; border: 1px solid var(--line); background: var(--card);
+           color: var(--text); cursor: pointer; transition: background 0.2s; }
+  button:hover { background: rgba(255, 255, 255, 0.1); }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  button.primary:hover { background: #1ee0b9; }
+  button.quiet { background: none; border-color: transparent; color: var(--muted); }
+  button.quiet:hover { color: var(--text); background: var(--card); }
+  .foot { color: var(--muted); font-size: 12.5px; text-align: center; margin: 12px 0 0; }
+  [hidden] { display: none !important; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+    .badge { opacity: 0; } .done .badge { opacity: 1; } .done .badge .check { stroke-dashoffset: 0; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <p class="brand">NEAR Signer</p>
+    <h1>Show the phone's answer</h1>
+    <p class="hint" id="hint">Hold the QR code on the phone up to the camera, 15 to 30 cm away.</p>
+  </header>
+  <div class="frame" id="frame">
+    <video id="video" playsinline muted></video>
+    <canvas id="overlay" aria-hidden="true"></canvas>
+    <div class="viewfinder" aria-hidden="true">
+      <span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
+      <span class="scanline"></span>
+    </div>
+    <div class="badge" aria-hidden="true">
+      <span class="ripple"></span>
+      <svg viewBox="0 0 64 64"><circle class="disc" cx="32" cy="32" r="30"/><path class="check" d="M19 33 L28 42 L45 24"/></svg>
+    </div>
+  </div>
+  <p class="status" id="status" role="status" aria-live="polite">Starting the camera…</p>
+  <div class="actions">
+    <button id="retry" type="button" class="primary" hidden>Try again</button>
+    <button id="switch" type="button" hidden>Switch camera</button>
+    <button id="close" type="button" class="quiet">Close</button>
+  </div>
+  <p class="foot" id="foot" hidden>No luck? Close this window; the wallet also reads a photo of the code, or takes it typed.</p>
+</main>
+<script>/* BUILD: vendor/jsQR.js optical.mjs scan.mjs executor/camera.js */</script>
+</body>
+</html>

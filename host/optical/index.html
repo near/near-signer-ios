@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>NEAR Signer camera transfer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; font: 15px/1.45 -apple-system, system-ui, sans-serif; background: #0d0d10; color: #e8e8ec; }
+  main { display: grid; grid-template-columns: 340px 1fr 360px; gap: 24px; padding: 24px; max-width: 1400px; margin: 0 auto; }
+  h1 { font-size: 18px; margin: 0 0 12px; }
+  h2 { font-size: 14px; margin: 18px 0 8px; color: #9a9aa6; text-transform: uppercase; letter-spacing: .04em; }
+  label { display: block; margin: 10px 0 4px; color: #b8b8c4; font-size: 13px; }
+  input, textarea, select, button { font: inherit; }
+  input, textarea, select { width: 100%; box-sizing: border-box; background: #17171c; color: #e8e8ec; border: 1px solid #2c2c34; border-radius: 8px; padding: 8px 10px; }
+  textarea { min-height: 96px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  button { background: #2f6df6; color: white; border: 0; border-radius: 8px; padding: 9px 14px; cursor: pointer; }
+  button.secondary { background: #24242c; }
+  button:disabled { opacity: .5; cursor: default; }
+  .row { display: flex; gap: 8px; margin-top: 12px; }
+  .row > * { flex: 1; }
+  #code { width: 100%; max-width: 560px; aspect-ratio: 1; background: white; border-radius: 12px; display: block; margin: 0 auto; }
+  #code.small { width: var(--code-width); }
+  #counter { text-align: center; color: #9a9aa6; margin-top: 10px; font-variant-numeric: tabular-nums; }
+  #hint { text-align: center; color: #b8b8c4; margin-top: 6px; }
+  video { width: 100%; border-radius: 10px; background: #000; display: none; }
+  pre { background: #17171c; border: 1px solid #2c2c34; border-radius: 8px; padding: 10px; white-space: pre-wrap; word-break: break-all; font-size: 12px; min-height: 40px; }
+  .ok { color: #4cd48a; } .bad { color: #ff6b6b; }
+  @media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+  <section>
+    <h1>NEAR Signer camera transfer</h1>
+    <p>Shows a request to the phone as a loop of QR codes, and reads its one-code answer. The format is in the README ("Camera transfer").</p>
+    <label for="kind">Request</label>
+    <select id="kind">
+      <option value="transaction">Sign transaction (borsh, base64)</option>
+      <option value="nep413">Sign NEP-413 message (borsh Payload, base64)</option>
+      <option value="nep366">Sign NEP-366 delegate action (borsh, base64)</option>
+      <option value="publicKey">Public key</option>
+    </select>
+    <label for="payload">Payload</label>
+    <textarea id="payload" placeholder="base64, e.g. near-cli-rs sign-later output"></textarea>
+    <label for="path">Derivation path</label>
+    <input id="path" value="m/44'/397'/0'/0'/1'">
+    <label for="publicKey">Account key, to verify the signature (optional; read from a transaction or delegate action when it names one)</label>
+    <input id="publicKey" placeholder="ed25519:…">
+    <label for="fps">Speed</label>
+    <select id="fps"><option value="10">10 /s</option><option value="15">15 /s</option><option value="20" selected>20 /s</option></select>
+    <div class="row">
+      <button id="start">Start</button>
+      <button id="stop" class="secondary" disabled>Stop</button>
+    </div>
+    <p id="error" class="bad"></p>
+  </section>
+
+  <section>
+    <canvas id="code" width="640" height="640"></canvas>
+    <div id="counter">Choose a request and press Start.</div>
+    <div id="hint"></div>
+  </section>
+
+  <section>
+    <h2>The phone's answer</h2>
+    <p>After approving, the phone shows one QR code. Hold it up to this computer's camera, or read a photo of it; typing the letters under it works too.</p>
+    <div class="row">
+      <button id="camera">Use this computer's camera</button>
+      <button id="photo" class="secondary">Read a photo of the code</button>
+    </div>
+    <input id="file" type="file" accept="image/*" capture="environment" hidden>
+    <video id="video" playsinline muted></video>
+    <label for="typed">Or type the code</label>
+    <textarea id="typed" placeholder="ABCDE FGHIJ …"></textarea>
+    <div class="row"><button id="check">Check</button></div>
+    <h2>Result</h2>
+    <pre id="result"></pre>
+  </section>
+</main>
+
+<script src="vendor/qrcode-generator.js"></script>
+<script src="vendor/jsQR.js"></script>
+<script type="module">
+import { Sender, encodeRequest, parseResponse, randomSessionId, statusMessage } from "./optical.mjs";
+import { qrMatrix, drawCanvas, fittingFragmentSize, codeWidth } from "./qr.mjs";
+import { codesInPhoto, isTouchDevice, openCamera, scanVideo } from "./scan.mjs";
+import {
+    NEP366_PREFIX, NEP413_PREFIX, base58Decode, base58Encode, base64ToBytes, bytesToBase64, concat,
+    delegatePublicKey, transactionPublicKey,
+} from "./borsh.mjs";
+
+const $ = (id) => document.getElementById(id);
+const canvas = $("code");
+const context = canvas.getContext("2d");
+let session = null; // { sender, request, timer, sequence }
+let cameraStream = null;
+
+function stop() {
+    if (session?.timer) clearInterval(session.timer);
+    session = null;
+    $("start").disabled = false;
+    $("stop").disabled = true;
+}
+
+$("kind").addEventListener("change", () => {
+    $("payload").disabled = $("kind").value === "publicKey";
+});
+
+/// Raw DEFLATE of a payload worth compressing (64 bytes or more, and smaller once compressed), or
+/// undefined. Browsers without CompressionStream send the payload as it is.
+async function deflateIfSmaller(payload) {
+    if (payload.length < 64 || typeof CompressionStream === "undefined") return undefined;
+    try {
+        const stream = new Blob([payload]).stream().pipeThrough(new CompressionStream("deflate-raw"));
+        const deflated = new Uint8Array(await new Response(stream).arrayBuffer());
+        // Four bytes of the message hold the inflated length.
+        return deflated.length + 4 < payload.length ? deflated : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+$("start").addEventListener("click", async () => {
+    $("error").textContent = "";
+    try {
+        const kind = $("kind").value;
+        const payload = kind === "publicKey" ? new Uint8Array(0) : base64ToBytes($("payload").value);
+        if (kind !== "publicKey" && payload.length === 0) throw new Error("Paste the payload first.");
+        const request = { kind, path: $("path").value, payload };
+        const given = $("publicKey").value.trim();
+        request.publicKey = given
+            ? base58Decode(given.replace(/^ed25519:/, ""))
+            : kind === "transaction" ? transactionPublicKey(payload) : kind === "nep366" ? delegatePublicKey(payload) : null;
+        const deflated = await deflateIfSmaller(payload);
+        // Bytes per code from the width there is for the code; a small request gets a small code.
+        const available = Math.min(560, canvas.parentElement.clientWidth);
+        const sender = new Sender(encodeRequest({ ...request, deflated }), {
+            sessionId: randomSessionId(),
+            fragmentSize: fittingFragmentSize(available),
+        });
+        stop();
+        session = { sender, request, sequence: 0, timer: null };
+        const codes = sender.fragmentCount;
+        canvas.classList.toggle("small", codes === 1);
+        canvas.style.setProperty("--code-width", `${codeWidth(qrMatrix(sender.frame(0)).size, available)}px`);
+        $("counter").textContent = codes === 1 ? "One code." : `${codes} codes, one at a time in a loop. Keep the phone pointed at them until it has all ${codes}.`;
+        const draw = () => {
+            drawCanvas(context, qrMatrix(sender.frame(session.sequence)), { size: canvas.width });
+            session.sequence += 1;
+        };
+        draw();
+        // One code stands still: every frame would carry the same piece.
+        if (codes > 1) session.timer = setInterval(draw, Math.round(1000 / Number($("fps").value)));
+        $("hint").textContent = "On the phone: open NEAR Signer, tap \"Scan from computer\" and point the camera at this code.";
+        $("start").disabled = true;
+        $("stop").disabled = false;
+        $("result").textContent = "";
+    } catch (error) {
+        $("error").textContent = error.message;
+    }
+});
+
+$("stop").addEventListener("click", stop);
+
+async function sha256(bytes) {
+    return new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+}
+
+async function verify(publicKey, digest, signature) {
+    try {
+        const key = await crypto.subtle.importKey("raw", publicKey, { name: "Ed25519" }, false, ["verify"]);
+        return (await crypto.subtle.verify("Ed25519", key, signature, digest)) ? "verified" : "WRONG SIGNATURE";
+    } catch {
+        return "not verified: this browser has no Ed25519 in WebCrypto";
+    }
+}
+
+async function handle(text) {
+    const response = parseResponse(text);
+    if (!response) return show({ error: "Not a NEAR Signer response code (check for typos)." }, false);
+    if (!session) return show({ error: "Start a request first." }, false);
+    const { sender, request } = session;
+    if (response.sessionId !== sender.sessionId) return show({ error: "This answer is for another request." }, false);
+    const out = { status: response.status.toString(16).padStart(4, "0").toUpperCase(), statusMessage: statusMessage(response.status) };
+    if (response.status !== 0x9000) return show(out, false);
+    if (request.kind === "publicKey") {
+        out.publicKey = `ed25519:${base58Encode(response.result)}`;
+        out.implicitAccountId = Array.from(response.result, (b) => b.toString(16).padStart(2, "0")).join("");
+    } else {
+        out.signature = bytesToBase64(response.result);
+        const digest =
+            request.kind === "transaction" ? await sha256(request.payload)
+            : request.kind === "nep413" ? await sha256(concat(NEP413_PREFIX, request.payload))
+            : await sha256(concat(NEP366_PREFIX, request.payload));
+        out.verification = request.publicKey ? await verify(request.publicKey, digest, response.result) : "not verified: no account key given";
+        if (request.kind !== "nep413") out.signedBase64 = bytesToBase64(concat(request.payload, Uint8Array.of(0), response.result));
+    }
+    show(out, true);
+    stop();
+    stopCamera();
+}
+
+function show(out, ok) {
+    $("result").textContent = JSON.stringify(out, null, 2);
+    $("result").className = ok && !/WRONG/.test(out.verification ?? "") ? "ok" : "bad";
+}
+
+$("check").addEventListener("click", () => handle($("typed").value));
+
+let stopScan = null;
+function stopCamera() {
+    stopScan?.();
+    stopScan = null;
+    if (cameraStream) for (const track of cameraStream.getTracks()) track.stop();
+    cameraStream = null;
+    $("video").style.display = "none";
+}
+
+// Codes read by the camera or found in a photo: the first that is an answer is checked like a typed one.
+function readCodes(codes) {
+    const text = codes.find((code) => parseResponse(code));
+    if (text) {
+        $("typed").value = text;
+        return handle(text);
+    }
+    show({ error: codes.length > 0 ? "That QR code isn't a NEAR Signer answer." : "No QR code in that photo." }, false);
+}
+
+$("camera").addEventListener("click", async () => {
+    if (cameraStream) return stopCamera();
+    try {
+        cameraStream = await openCamera();
+    } catch (error) {
+        $("result").textContent = error.message;
+        return;
+    }
+    const video = $("video");
+    video.srcObject = cameraStream;
+    video.style.display = "block";
+    await video.play();
+    stopScan = scanVideo(video, readCodes);
+});
+
+$("photo").addEventListener("click", () => $("file").click());
+$("file").addEventListener("change", async () => {
+    const [file] = $("file").files;
+    $("file").value = ""; // the same photo can be chosen again
+    if (!file) return;
+    try {
+        await readCodes(await codesInPhoto(file));
+    } catch (error) {
+        $("result").textContent = error.message;
+    }
+});
+if (isTouchDevice()) $("photo").textContent = "Take a photo of the phone's code";
+</script>
+</body>
+</html>

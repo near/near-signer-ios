@@ -39,6 +39,7 @@ PRIORITY CHECKS (report only if found):
 - **APDUs** (`APDU.swift`, `NearAppSession.swift`): instruction codes and status words must stay what near-connect, near-ledger-rs and Ledger Live expect (README "Protocol" table). Changing a status word or chunking rule can hang a host for minutes.
 - **Per-connection state.** One computer must never read or affect another's session or replies; a reply goes only to the subscription that asked for it.
 - **Pairing.** With pairing required (the default), writes are accepted only on the encrypted link; Bluetooth runs only while the app is unlocked and in the foreground, and going to the background rejects any pending prompt.
+- **Camera transfer** (`Sources/NearSignerCore/Optical/`, `host/optical/`, README "Camera transfer"): the frame, fountain and response formats are shared byte for byte between Swift and JavaScript; a change on one side needs the same change on the other and the `scripts/test-all.sh` pipe through `near-signer-sim optical` must still pass. The receiver enforces the limits before allocating; a decoded message goes through the same `SignerService` entry points as Bluetooth (never a shortcut); the response carries the session id and the host verifies the signature.
 
 ### 5. App lifecycle and UI safety (`iOS/NearSigner/`)
 
