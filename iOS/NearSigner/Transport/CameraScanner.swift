@@ -30,6 +30,8 @@ final class CameraScanner {
     private let box = SessionBox()
     private let queue = DispatchQueue(label: "near-signer.camera")
     private var configured = false
+    /// Set by `start`, cleared by `stop`: a stop during the permission prompt keeps the camera off.
+    private var wanted = false
     @ObservationIgnored private lazy var delegate = Delegate { [weak self] codes in
         guard let self, self.isRunning else { return }
         for code in codes { self.onCode?(code) }
@@ -49,11 +51,12 @@ final class CameraScanner {
 
     /// Asks for permission the first time, then starts the camera.
     func start() async {
+        wanted = true
         permission = CameraScanner.currentPermission
         if permission == .undetermined {
             permission = await AVCaptureDevice.requestAccess(for: .video) ? .authorized : .denied
         }
-        guard permission == .authorized else { return }
+        guard permission == .authorized, wanted else { return }
         if !configured {
             configured = true
             if let problem = configure() {
@@ -70,6 +73,7 @@ final class CameraScanner {
     }
 
     func stop() {
+        wanted = false
         isRunning = false
         let box = self.box
         queue.async {

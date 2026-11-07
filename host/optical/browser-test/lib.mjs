@@ -3,7 +3,7 @@
 // plays the phone. Not part of CI (they need a browser): see README.md, "Testing".
 //
 //   python3 -m http.server -d host/optical 8080 &      # the pages
-//   swift build --product near-signer-sim               # the phone
+//   swift build --product near-signer-sim               # the phone (or NEAR_SIGNER_SIM=/path)
 //   cd host/optical/browser-test && npm install --no-save playwright-core jsqr pngjs
 //   npx --yes playwright@1.56.1 install chromium       # or CHROME_BIN=/path/to/chrome
 //   node test-index.mjs && node test-dapp.mjs && node test-dapp-edges.mjs
@@ -16,7 +16,8 @@ import { Receiver } from "../optical.mjs";
 
 const qrcode = (await import("../vendor/qrcode-generator.js")).default;
 
-export const SIM = new URL("../../../.build/debug/near-signer-sim", import.meta.url).pathname;
+export const SIM =
+    process.env.NEAR_SIGNER_SIM ?? new URL("../../../.build/debug/near-signer-sim", import.meta.url).pathname;
 export const TRANSFER_TX =
     "DQAAAGFsaWNlLnRlc3RuZXQAxXHjPi42wsco1hfqd6iOIyDIaX6si0Y638ASi5aCXL8HAAAAAAAAAAsAAABib2IudGVzdG5ldDlKvrNecHYJ3o9ztj1DvRo3b/5nk1yqaJN90pvATmc8AQAAAAMAAIBxZDO2KaM9AQAAAAAA";
 

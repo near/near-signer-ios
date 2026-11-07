@@ -12654,6 +12654,12 @@ function parseFrame(text) {
     return frame;
 }
 
+/// Unknown fragment indexes the kept mixed frames may hold in all, per fragment of the message,
+/// as in the phone's receiver: without a budget a hostile screen could declare 65 535 one-byte
+/// fragments and show frames mixing tens of thousands of them. An honest transfer stays far below
+/// it (frames mix about ln K fragments on average).
+const HELD_INDEXES_PER_FRAGMENT = 16;
+
 /// Collects frames and recovers the message by peeling: a mixed frame whose other fragments are
 /// known yields the missing one, which may in turn resolve earlier mixed frames.
 class Receiver {
@@ -12715,6 +12721,8 @@ class Receiver {
         }
         session.complete = true;
         session.message = message;
+        session.mixed = [];
+        session.held = 0;
         return { kind: "complete", message };
     }
 
@@ -12739,6 +12747,7 @@ class Receiver {
             fragmentCount: frame.fragmentCount,
             known: new Map(),
             mixed: [],
+            held: 0, // unknown fragment indexes across `mixed`
             seen: new Set(),
             complete: false,
             message: null,
@@ -12756,7 +12765,18 @@ class Receiver {
         }
         if (part.indexes.size === 0) return;
         if (part.indexes.size > 1) {
+            // Bounded: a hostile or very long stream can't grow memory without end. The oldest
+            // frames go first, to keep at most 4096 frames and the budget of unknown indexes.
+            const cap = Math.max(16, Math.min(4 * session.fragmentCount, 4096));
+            const budget = HELD_INDEXES_PER_FRAGMENT * session.fragmentCount;
+            while (
+                session.mixed.length > 0 &&
+                (session.mixed.length >= cap || session.held + part.indexes.size > budget)
+            ) {
+                session.held -= session.mixed.shift().indexes.size;
+            }
             session.mixed.push(part);
+            session.held += part.indexes.size;
             return;
         }
         const solved = [[part.indexes.values().next().value, part.data]];
@@ -12768,7 +12788,9 @@ class Receiver {
                 if (!other.indexes.has(index)) return true;
                 xorInto(other.data, fragment);
                 other.indexes.delete(index);
+                session.held -= 1;
                 if (other.indexes.size === 1) {
+                    session.held -= 1;
                     solved.push([other.indexes.values().next().value, other.data]);
                     return false;
                 }
@@ -12888,6 +12910,7 @@ const STATUS_MESSAGES = {
     0xb00d: "the transaction's key is not the phone's key at that path",
     0x5515: "no key on the phone",
     0x6a80: "invalid data",
+    0x6d00: "the phone doesn't know this request",
     0x6601: "the phone is busy with another request",
 };
 
@@ -12997,7 +13020,9 @@ class Writer {
         return this;
     }
 
+    /// A missing string throws: TextEncoder would quietly encode `undefined` as "".
     string(value) {
+        if (typeof value !== "string") throw new TypeError(`expected a string, got ${typeof value}`);
         return this.bytes(new TextEncoder().encode(value));
     }
 
@@ -13011,8 +13036,18 @@ class Writer {
     }
 }
 
+/// Bytes given as bytes (a typed array, a DataView or an ArrayBuffer), or null.
+function asBytes(value) {
+    if (value instanceof Uint8Array) return value;
+    if (ArrayBuffer.isView(value)) return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+    if (value instanceof ArrayBuffer) return new Uint8Array(value);
+    return null;
+}
+
+/// A function call's arguments: bytes as they are, base64 text decoded, any other object as JSON.
 function argsBytes(args) {
-    if (args instanceof Uint8Array) return args;
+    const bytes = asBytes(args);
+    if (bytes) return bytes;
     if (typeof args === "string") return Uint8Array.from(atob(args), (c) => c.charCodeAt(0));
     if (args && typeof args === "object") return new TextEncoder().encode(JSON.stringify(args));
     return new Uint8Array(0);
@@ -13025,8 +13060,12 @@ function actionBytes(action) {
     switch (action.type) {
         case "CreateAccount":
             return w.u8(0).build();
-        case "DeployContract":
-            return w.u8(1).bytes(argsBytes(p.code)).build();
+        case "DeployContract": {
+            // Contract code is bytes: anything else would deploy its JSON, or nothing.
+            const code = asBytes(p.code);
+            if (!code) throw new Error("DeployContract needs the contract code as bytes");
+            return w.u8(1).bytes(code).build();
+        }
         case "FunctionCall":
             return w
                 .u8(2)
@@ -13043,8 +13082,12 @@ function actionBytes(action) {
             w.u8(5)
                 .raw(publicKeyBytes(p.publicKey))
                 .u64(p.accessKey?.nonce ?? 0n);
+            // The permission is never assumed: a missing one is refused, not made a full-access key.
             const permission = p.accessKey?.permission;
-            if (permission === "FullAccess" || permission === undefined) return w.u8(1).build();
+            if (permission === "FullAccess") return w.u8(1).build();
+            if (!permission || typeof permission !== "object" || typeof permission.receiverId !== "string") {
+                throw new Error('AddKey needs a permission: "FullAccess" or { receiverId, methodNames, allowance }');
+            }
             w.u8(0);
             if (permission.allowance === undefined || permission.allowance === null) {
                 w.u8(0);
@@ -13096,13 +13139,26 @@ function buildDelegateAction({ senderId, receiverId, actions, nonce, maxBlockHei
         .build();
 }
 
-/// borsh(Payload) of NEP-413, what `sign-message` (APDU `80 07`) signs. `nonce` is 32 bytes.
+/// The 32-byte NEP-413 nonce an app passed (a typed array, an ArrayBuffer, or a plain array of
+/// bytes, which is how a Uint8Array survives JSON), or an error: a missing nonce is never zeros.
+function nep413Nonce(value) {
+    let bytes = asBytes(value);
+    if (!bytes && Array.isArray(value) && value.every((byte) => Number.isInteger(byte) && byte >= 0 && byte <= 255)) {
+        bytes = Uint8Array.from(value);
+    }
+    if (!bytes || bytes.length !== 32) throw new Error("The app's message has no 32-byte nonce (NEP-413).");
+    return bytes;
+}
+
+/// borsh(Payload) of NEP-413, what `sign-message` (APDU `80 07`) signs. `nonce` is 32 bytes, and
+/// the message and recipient are required (an empty recipient would bind the signature to none).
 function nep413Payload({ message, recipient, nonce, callbackUrl }) {
     if (!(nonce instanceof Uint8Array) || nonce.length !== 32) throw new Error("NEP-413 nonce must be 32 bytes");
-    const w = new Writer()
-        .string(message)
-        .raw(nonce)
-        .string(recipient ?? "");
+    if (typeof message !== "string") throw new Error("The app's message is missing (NEP-413).");
+    if (typeof recipient !== "string" || recipient === "") {
+        throw new Error("The app's message names no recipient (NEP-413).");
+    }
+    const w = new Writer().string(message).raw(nonce).string(recipient);
     if (callbackUrl) {
         w.u8(1).string(callbackUrl);
     } else {
@@ -13501,14 +13557,16 @@ async function sha256(bytes) {
     return new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
 }
 
-/// Checks the phone's signature when the browser can. A browser without Ed25519 in WebCrypto
-/// trusts the phone, as the network will check anyway.
+/// Checks the phone's signature before it is used. A browser without Ed25519 in WebCrypto can't
+/// check it, so nothing is signed there: the signature is never passed on unchecked.
 async function verifySignature(publicKey, digest, signature) {
     let key;
     try {
         key = await crypto.subtle.importKey("raw", publicKey, { name: "Ed25519" }, false, ["verify"]);
     } catch {
-        return;
+        throw new Error(
+            "This browser can't check the phone's signature (it has no Ed25519). Use a current Chrome, Edge, Firefox or Safari.",
+        );
     }
     if (!(await crypto.subtle.verify("Ed25519", key, signature, digest))) {
         throw new Error("The phone's signature does not verify against the account's key.");
@@ -14126,10 +14184,11 @@ class NearSignerQRWallet {
     }
 
     async signInAndSignMessage(params) {
+        // A message the phone could not sign is refused before the phone is asked for its key.
+        const { message, recipient, nonce } = params.messageParams ?? {};
+        const payload = nep413Payload({ message, recipient, nonce: nep413Nonce(nonce) });
         try {
             const { accounts, path } = await this.connect(params);
-            const { message, recipient, nonce } = params.messageParams;
-            const payload = nep413Payload({ message, recipient: recipient || "", nonce: nonce || new Uint8Array(32) });
             const signature = await this.signBytes(
                 "nep413",
                 payload,
@@ -14137,7 +14196,7 @@ class NearSignerQRWallet {
                 accounts[0].publicKey,
                 "Sign in",
                 "The app's sign-in message, for",
-                recipient || "the app",
+                recipient,
             );
             return accounts.map((account) => ({
                 ...account,
@@ -14256,8 +14315,8 @@ class NearSignerQRWallet {
         const path = await this.getDerivationPath();
         const payload = nep413Payload({
             message: params.message,
-            recipient: params.recipient || "",
-            nonce: params.nonce || new Uint8Array(32),
+            recipient: params.recipient,
+            nonce: nep413Nonce(params.nonce),
             callbackUrl: params.callbackUrl,
         });
         try {
@@ -14268,7 +14327,7 @@ class NearSignerQRWallet {
                 account.publicKey,
                 "Sign the message",
                 "For",
-                params.recipient || "the app",
+                params.recipient,
             );
             return { accountId: account.accountId, publicKey: account.publicKey, signature: bytesToBase64(signature) };
         } finally {

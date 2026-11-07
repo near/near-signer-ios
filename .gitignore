@@ -28,7 +28,7 @@ __pycache__/
 .venv/
 
 # Node.js (scripts/gen-token-icons.mjs needs @resvg/resvg-js installed next to it)
-node_modules/
+node_modules
 /package.json
 /package-lock.json
 

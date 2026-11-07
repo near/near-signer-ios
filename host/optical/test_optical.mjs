@@ -20,6 +20,7 @@ import {
     parseRequest,
     parseResponse,
     pathBytes,
+    statusMessage,
 } from "./optical.mjs";
 import {
     actionBytes,
@@ -27,6 +28,7 @@ import {
     base64ToBytes,
     buildDelegateAction,
     buildTransaction,
+    nep413Nonce,
     nep413Payload,
     withSignature,
 } from "./borsh.mjs";
@@ -171,6 +173,39 @@ test("borsh builders reproduce near-api-js bytes", () => {
     assert.equal(withSignature(delegate, new Uint8Array(64)).length, delegate.length + 65);
 });
 
+test("borsh builders refuse what they would otherwise fill in", () => {
+    const publicKey = "ed25519:EHk3HArKPRpX7564aTMD7VJdbQRoWA9JvJaEvbta2iSz";
+    // An AddKey without a permission is not a full-access key.
+    assert.throws(() => actionBytes({ type: "AddKey", params: { publicKey } }), /AddKey needs a permission/);
+    assert.throws(
+        () => actionBytes({ type: "AddKey", params: { publicKey, accessKey: {} } }),
+        /AddKey needs a permission/,
+    );
+    assert.throws(
+        () => actionBytes({ type: "AddKey", params: { publicKey, accessKey: { permission: { methodNames: [] } } } }),
+        /AddKey needs a permission/,
+        "a function-call permission names its contract",
+    );
+    // Contract code is bytes, not missing and not an object turned into JSON.
+    assert.throws(() => actionBytes({ type: "DeployContract", params: {} }), /contract code as bytes/);
+    assert.throws(() => actionBytes({ type: "DeployContract", params: { code: { 0: 1 } } }), /contract code as bytes/);
+    assert.equal(actionBytes({ type: "DeployContract", params: { code: new Uint8Array([1, 2]).buffer } }).length, 7);
+    // A missing string is not an empty one.
+    assert.throws(() => actionBytes({ type: "FunctionCall", params: { args: {}, gas: "1", deposit: "0" } }), /string/);
+    assert.throws(() => actionBytes({ type: "DeleteAccount", params: {} }), /string/);
+    // NEP-413: the nonce is the app's 32 bytes, never zeros filled in; the recipient is required.
+    const nonce = randomBytes(32);
+    assert.deepEqual(nep413Nonce(nonce), nonce);
+    assert.deepEqual(nep413Nonce(Array.from(nonce)), nonce, "a Uint8Array that went through JSON");
+    assert.deepEqual(nep413Nonce(nonce.buffer), nonce);
+    for (const bad of [undefined, null, "", new Uint8Array(31), new Uint8Array(33), [256, ...new Array(31).fill(0)]]) {
+        assert.throws(() => nep413Nonce(bad), /no 32-byte nonce/);
+    }
+    assert.throws(() => nep413Payload({ message: "hi", nonce }), /names no recipient/);
+    assert.throws(() => nep413Payload({ message: "hi", recipient: "", nonce }), /names no recipient/);
+    assert.throws(() => nep413Payload({ recipient: "app.near", nonce }), /message is missing/);
+});
+
 test("frames round-trip through parseFrame", () => {
     const sender = new Sender(utf8("hello"), { sessionId: 0x01020304, fragmentSize: 4 });
     assert.equal(sender.fragmentCount, 2);
@@ -235,6 +270,79 @@ test("receiver handles one fragment and a large message", () => {
     assert.deepEqual(result.message, message);
 });
 
+test("receiver holds a bounded number of unknown fragment indexes", () => {
+    // How many fragments frame `s` mixes: the first draw of fountainIndexes, without choosing them
+    // (fountainIndexes itself walks all 65 535 fragments).
+    const degreeOf = (sessionId, s, count) => {
+        if (Math.floor(s / count) % 2 === 0) return 1;
+        let x = ((sessionId >>> 0) ^ Math.imul(s, 0x9e3779b9)) >>> 0;
+        if (x === 0) x = 0x9e3779b9;
+        x ^= x << 13;
+        x ^= x >>> 17;
+        x ^= x << 5;
+        x >>>= 0;
+        return Math.min(Math.floor((2 ** 32 - 1) / (2 ** 32 - x)) + 1, count);
+    };
+    const heldOf = (receiver) => receiver.session.mixed.reduce((n, part) => n + part.indexes.size, 0);
+
+    // A hostile screen declares 65 535 one-byte fragments and shows frames that mix thousands of
+    // them. Narrow frames are kept, and what the wide ones add stays within 16 indexes per fragment.
+    const count = 65535;
+    const sender = new Sender(new Uint8Array(count).fill(0x5a), { sessionId: 77, fragmentSize: 1 });
+    const receiver = new Receiver();
+    let narrow = 0;
+    for (let s = count; narrow < 20; s++) {
+        const degree = degreeOf(77, s, count);
+        if (degree < 2 || degree > 8) continue;
+        receiver.receive(sender.frame(s));
+        narrow += 1;
+    }
+    assert.ok(receiver.session.held > 0, "narrow frames are kept");
+    let wide = 0;
+    for (let s = count; wide < 20; s++) {
+        const degree = degreeOf(77, s, count);
+        if (degree <= 1000) continue;
+        assert.equal(fountainIndexes(77, s, count).length, degree);
+        receiver.receive(sender.frame(s));
+        wide += 1;
+        assert.ok(receiver.session.held <= 16 * count);
+        assert.equal(receiver.session.held, heldOf(receiver));
+    }
+
+    // Past the budget the oldest frames go: wide frames until twice the budget has been shown.
+    const small = 2000;
+    const bounded = new Sender(new Uint8Array(small).fill(0x5a), { sessionId: 78, fragmentSize: 1 });
+    const other = new Receiver();
+    let shown = 0;
+    for (let s = small; shown <= 2 * 16 * small; s++) {
+        const degree = degreeOf(78, s, small);
+        if (degree <= 200) continue;
+        other.receive(bounded.frame(s));
+        shown += degree;
+        assert.ok(other.session.held <= 16 * small, `holds ${other.session.held}`);
+        assert.equal(other.session.held, heldOf(other));
+    }
+    assert.ok(other.session.mixed.length > 0);
+});
+
+test("receiver bounds the mixed frames it keeps", () => {
+    // Fragments 0 and 1 never arrive directly, only mixed frames: many more than are kept.
+    const message = randomBytes(4000);
+    const sender = new Sender(message, { sessionId: 31, fragmentSize: 1000 });
+    const receiver = new Receiver();
+    receiver.receive(sender.frame(2));
+    receiver.receive(sender.frame(3));
+    let result;
+    for (let s = 4; s < 5000; s++) {
+        if (s % 4 < 2 && Math.floor(s / 4) % 2 === 0) continue; // fragments 0 and 1 in even blocks
+        result = receiver.receive(sender.frame(s));
+        assert.ok(receiver.session.mixed.length <= 16, "at most max(16, min(4K, 4096)) kept");
+        if (result.kind === "complete") break;
+    }
+    assert.equal(result.kind, "complete");
+    assert.deepEqual(result.message, message);
+});
+
 test("receiver rejects a corrupted message and ignores strays", () => {
     const sender = new Sender(randomBytes(300), { sessionId: 5, fragmentSize: 100 });
     const receiver = new Receiver();
@@ -286,6 +394,16 @@ test("requests and responses round-trip", () => {
     assert.equal(parseResponse(text.slice(0, -1) + (text.endsWith("A") ? "B" : "A")), null, "a typo fails the CRC");
     assert.equal(parseResponse(encodeResponse({ sessionId: 1, status: 0xb005 })).status, 0xb005);
     assert.equal(parseResponse(encodeResponse({ sessionId: 1, status: 0xb005 })).result.length, 0);
+    // A message that isn't a request gets a status of its own, which the executor shows.
+    for (const [status, words] of [
+        [0x6d00, "doesn't know this request"],
+        [0xb00b, "bad derivation path"],
+        [0x6a80, "invalid data"],
+    ]) {
+        assert.equal(parseResponse(encodeResponse({ sessionId: 2, status })).status, status);
+        assert.match(statusMessage(status), new RegExp(words));
+    }
+    assert.equal(statusMessage(0x1234), "status 1234");
 });
 
 test("compressed payloads: flag, length, inflate, and never for a public key", () => {

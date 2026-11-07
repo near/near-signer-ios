@@ -8,11 +8,14 @@ on:
 
 jobs:
   claude-review:
-    # PRs from forks get no secrets, so they are skipped. A comment triggers a review only when
-    # its author can write to the repository, so outsiders can't spend the API key.
+    # PRs from forks get no secrets, so they are skipped. So are Dependabot's: its runs get only
+    # Dependabot secrets (a maintainer's "@claude review" comment still reviews one). A comment
+    # triggers a review only when its author can write to the repository, so outsiders can't spend
+    # the API key.
     if: |
       (github.event_name == 'pull_request' && !github.event.pull_request.draft &&
-       github.event.pull_request.head.repo.full_name == github.repository) ||
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       github.actor != 'dependabot[bot]') ||
       (github.event_name == 'issue_comment' &&
        github.event.issue.pull_request &&
        contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association) &&
@@ -28,6 +31,15 @@ jobs:
       id-token: write
 
     steps:
+      - name: Check the API key
+        env:
+          ANTHROPIC_API: ${{ secrets.ANTHROPIC_API }}
+        run: |
+          if [ -z "$ANTHROPIC_API" ]; then
+            echo "::error::The ANTHROPIC_API secret is empty. Add it under Settings > Secrets and variables > Actions (an organization secret must also grant this repository access)."
+            exit 1
+          fi
+
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

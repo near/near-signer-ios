@@ -99,7 +99,9 @@ class Writer {
         return this;
     }
 
+    /// A missing string throws: TextEncoder would quietly encode `undefined` as "".
     string(value) {
+        if (typeof value !== "string") throw new TypeError(`expected a string, got ${typeof value}`);
         return this.bytes(new TextEncoder().encode(value));
     }
 
@@ -113,8 +115,18 @@ class Writer {
     }
 }
 
+/// Bytes given as bytes (a typed array, a DataView or an ArrayBuffer), or null.
+function asBytes(value) {
+    if (value instanceof Uint8Array) return value;
+    if (ArrayBuffer.isView(value)) return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+    if (value instanceof ArrayBuffer) return new Uint8Array(value);
+    return null;
+}
+
+/// A function call's arguments: bytes as they are, base64 text decoded, any other object as JSON.
 function argsBytes(args) {
-    if (args instanceof Uint8Array) return args;
+    const bytes = asBytes(args);
+    if (bytes) return bytes;
     if (typeof args === "string") return Uint8Array.from(atob(args), (c) => c.charCodeAt(0));
     if (args && typeof args === "object") return new TextEncoder().encode(JSON.stringify(args));
     return new Uint8Array(0);
@@ -127,8 +139,12 @@ export function actionBytes(action) {
     switch (action.type) {
         case "CreateAccount":
             return w.u8(0).build();
-        case "DeployContract":
-            return w.u8(1).bytes(argsBytes(p.code)).build();
+        case "DeployContract": {
+            // Contract code is bytes: anything else would deploy its JSON, or nothing.
+            const code = asBytes(p.code);
+            if (!code) throw new Error("DeployContract needs the contract code as bytes");
+            return w.u8(1).bytes(code).build();
+        }
         case "FunctionCall":
             return w
                 .u8(2)
@@ -145,8 +161,12 @@ export function actionBytes(action) {
             w.u8(5)
                 .raw(publicKeyBytes(p.publicKey))
                 .u64(p.accessKey?.nonce ?? 0n);
+            // The permission is never assumed: a missing one is refused, not made a full-access key.
             const permission = p.accessKey?.permission;
-            if (permission === "FullAccess" || permission === undefined) return w.u8(1).build();
+            if (permission === "FullAccess") return w.u8(1).build();
+            if (!permission || typeof permission !== "object" || typeof permission.receiverId !== "string") {
+                throw new Error('AddKey needs a permission: "FullAccess" or { receiverId, methodNames, allowance }');
+            }
             w.u8(0);
             if (permission.allowance === undefined || permission.allowance === null) {
                 w.u8(0);
@@ -198,13 +218,26 @@ export function buildDelegateAction({ senderId, receiverId, actions, nonce, maxB
         .build();
 }
 
-/// borsh(Payload) of NEP-413, what `sign-message` (APDU `80 07`) signs. `nonce` is 32 bytes.
+/// The 32-byte NEP-413 nonce an app passed (a typed array, an ArrayBuffer, or a plain array of
+/// bytes, which is how a Uint8Array survives JSON), or an error: a missing nonce is never zeros.
+export function nep413Nonce(value) {
+    let bytes = asBytes(value);
+    if (!bytes && Array.isArray(value) && value.every((byte) => Number.isInteger(byte) && byte >= 0 && byte <= 255)) {
+        bytes = Uint8Array.from(value);
+    }
+    if (!bytes || bytes.length !== 32) throw new Error("The app's message has no 32-byte nonce (NEP-413).");
+    return bytes;
+}
+
+/// borsh(Payload) of NEP-413, what `sign-message` (APDU `80 07`) signs. `nonce` is 32 bytes, and
+/// the message and recipient are required (an empty recipient would bind the signature to none).
 export function nep413Payload({ message, recipient, nonce, callbackUrl }) {
     if (!(nonce instanceof Uint8Array) || nonce.length !== 32) throw new Error("NEP-413 nonce must be 32 bytes");
-    const w = new Writer()
-        .string(message)
-        .raw(nonce)
-        .string(recipient ?? "");
+    if (typeof message !== "string") throw new Error("The app's message is missing (NEP-413).");
+    if (typeof recipient !== "string" || recipient === "") {
+        throw new Error("The app's message names no recipient (NEP-413).");
+    }
+    const w = new Writer().string(message).raw(nonce).string(recipient);
     if (callbackUrl) {
         w.u8(1).string(callbackUrl);
     } else {

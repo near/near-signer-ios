@@ -283,6 +283,25 @@ final class OpticalTests: XCTestCase {
         XCTAssertEqual(OpticalRequest(message: Data([0x08]) + BIP32Path.ledgerDefault.serialized + Data([1]))?.signKind, .nep366)
     }
 
+    /// A message that isn't a request is answered with the status Bluetooth would give, so the
+    /// computer learns why instead of showing the same codes again.
+    func testRefusedRequestsSayWhy() throws {
+        let payload = Data(base64Encoded: Fixtures.transactions[0].borsh)!
+        func status(_ message: Data) -> StatusWord? {
+            if case let .failure(status) = OpticalRequest.parse(message) { return status }
+            return nil
+        }
+        XCTAssertEqual(status(Data([0x02, 0, 0])), .invalidData, "too short")
+        XCTAssertEqual(status(Data([0x06]) + BIP32Path.ledgerDefault.serialized), .insNotSupported)
+        XCTAssertEqual(status(Data([0x02]) + BIP32Path(hardened: [44, 60, 0, 0, 1]).serialized + payload), .badPath)
+        XCTAssertEqual(status(Data([0x04]) + BIP32Path.ledgerDefault.serialized + Data([1])), .invalidData,
+                       "a public key request carries no payload")
+        let compressed = Data([0x82]) + BIP32Path.ledgerDefault.serialized
+        XCTAssertEqual(status(compressed + Data([0, 0, 0, 5, 0xFF, 0xFF])), .invalidData, "doesn't inflate")
+        XCTAssertEqual(status(compressed + Data([0, 0, 0, 0])), .invalidData, "declares no payload")
+        XCTAssertNil(status(Data([0x02]) + BIP32Path.ledgerDefault.serialized + payload))
+    }
+
     func testResponseText() throws {
         let response = OpticalResponse(sessionId: 0x0102_0304, status: .ok, result: Data(repeating: 7, count: 64))
         let text = response.text

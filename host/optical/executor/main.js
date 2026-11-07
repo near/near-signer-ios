@@ -128,14 +128,16 @@ async function sha256(bytes) {
     return new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
 }
 
-/// Checks the phone's signature when the browser can. A browser without Ed25519 in WebCrypto
-/// trusts the phone, as the network will check anyway.
+/// Checks the phone's signature before it is used. A browser without Ed25519 in WebCrypto can't
+/// check it, so nothing is signed there: the signature is never passed on unchecked.
 async function verifySignature(publicKey, digest, signature) {
     let key;
     try {
         key = await crypto.subtle.importKey("raw", publicKey, { name: "Ed25519" }, false, ["verify"]);
     } catch {
-        return;
+        throw new Error(
+            "This browser can't check the phone's signature (it has no Ed25519). Use a current Chrome, Edge, Firefox or Safari.",
+        );
     }
     if (!(await crypto.subtle.verify("Ed25519", key, signature, digest))) {
         throw new Error("The phone's signature does not verify against the account's key.");
@@ -753,10 +755,11 @@ class NearSignerQRWallet {
     }
 
     async signInAndSignMessage(params) {
+        // A message the phone could not sign is refused before the phone is asked for its key.
+        const { message, recipient, nonce } = params.messageParams ?? {};
+        const payload = nep413Payload({ message, recipient, nonce: nep413Nonce(nonce) });
         try {
             const { accounts, path } = await this.connect(params);
-            const { message, recipient, nonce } = params.messageParams;
-            const payload = nep413Payload({ message, recipient: recipient || "", nonce: nonce || new Uint8Array(32) });
             const signature = await this.signBytes(
                 "nep413",
                 payload,
@@ -764,7 +767,7 @@ class NearSignerQRWallet {
                 accounts[0].publicKey,
                 "Sign in",
                 "The app's sign-in message, for",
-                recipient || "the app",
+                recipient,
             );
             return accounts.map((account) => ({
                 ...account,
@@ -883,8 +886,8 @@ class NearSignerQRWallet {
         const path = await this.getDerivationPath();
         const payload = nep413Payload({
             message: params.message,
-            recipient: params.recipient || "",
-            nonce: params.nonce || new Uint8Array(32),
+            recipient: params.recipient,
+            nonce: nep413Nonce(params.nonce),
             callbackUrl: params.callbackUrl,
         });
         try {
@@ -895,7 +898,7 @@ class NearSignerQRWallet {
                 account.publicKey,
                 "Sign the message",
                 "For",
-                params.recipient || "the app",
+                params.recipient,
             );
             return { accountId: account.accountId, publicKey: account.publicKey, signature: bytesToBase64(signature) };
         } finally {

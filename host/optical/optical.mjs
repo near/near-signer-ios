@@ -244,6 +244,12 @@ export function parseFrame(text) {
     return frame;
 }
 
+/// Unknown fragment indexes the kept mixed frames may hold in all, per fragment of the message,
+/// as in the phone's receiver: without a budget a hostile screen could declare 65 535 one-byte
+/// fragments and show frames mixing tens of thousands of them. An honest transfer stays far below
+/// it (frames mix about ln K fragments on average).
+export const HELD_INDEXES_PER_FRAGMENT = 16;
+
 /// Collects frames and recovers the message by peeling: a mixed frame whose other fragments are
 /// known yields the missing one, which may in turn resolve earlier mixed frames.
 export class Receiver {
@@ -305,6 +311,8 @@ export class Receiver {
         }
         session.complete = true;
         session.message = message;
+        session.mixed = [];
+        session.held = 0;
         return { kind: "complete", message };
     }
 
@@ -329,6 +337,7 @@ export class Receiver {
             fragmentCount: frame.fragmentCount,
             known: new Map(),
             mixed: [],
+            held: 0, // unknown fragment indexes across `mixed`
             seen: new Set(),
             complete: false,
             message: null,
@@ -346,7 +355,18 @@ export class Receiver {
         }
         if (part.indexes.size === 0) return;
         if (part.indexes.size > 1) {
+            // Bounded: a hostile or very long stream can't grow memory without end. The oldest
+            // frames go first, to keep at most 4096 frames and the budget of unknown indexes.
+            const cap = Math.max(16, Math.min(4 * session.fragmentCount, 4096));
+            const budget = HELD_INDEXES_PER_FRAGMENT * session.fragmentCount;
+            while (
+                session.mixed.length > 0 &&
+                (session.mixed.length >= cap || session.held + part.indexes.size > budget)
+            ) {
+                session.held -= session.mixed.shift().indexes.size;
+            }
             session.mixed.push(part);
+            session.held += part.indexes.size;
             return;
         }
         const solved = [[part.indexes.values().next().value, part.data]];
@@ -358,7 +378,9 @@ export class Receiver {
                 if (!other.indexes.has(index)) return true;
                 xorInto(other.data, fragment);
                 other.indexes.delete(index);
+                session.held -= 1;
                 if (other.indexes.size === 1) {
+                    session.held -= 1;
                     solved.push([other.indexes.values().next().value, other.data]);
                     return false;
                 }
@@ -478,6 +500,7 @@ export const STATUS_MESSAGES = {
     0xb00d: "the transaction's key is not the phone's key at that path",
     0x5515: "no key on the phone",
     0x6a80: "invalid data",
+    0x6d00: "the phone doesn't know this request",
     0x6601: "the phone is busy with another request",
 };
 

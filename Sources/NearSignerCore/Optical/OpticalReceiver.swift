@@ -52,10 +52,18 @@ public final class OpticalReceiver {
         var data: Data
     }
 
+    /// Unknown fragment indexes the kept mixed frames may hold in all, per fragment of the message.
+    /// Each costs a set entry, so without a budget a hostile screen could declare 65 535 one-byte
+    /// fragments and show frames mixing tens of thousands of them: gigabytes across the kept
+    /// frames. An honest transfer stays far below it (frames mix about ln K fragments on average).
+    static let heldIndexesPerFragment = 16
+
     private var session: Session?
     private var known: [Data?] = []
     private var knownCount = 0
     private var mixed: [Mixed] = []
+    /// Unknown fragment indexes held across `mixed`.
+    private(set) var heldIndexes = 0
     private var finished = false
     private var otherSessionId: UInt32?
     private var otherSessionFrames = 0
@@ -71,6 +79,7 @@ public final class OpticalReceiver {
         known = []
         knownCount = 0
         mixed = []
+        heldIndexes = 0
         finished = false
         progress = nil
         otherSessionId = nil
@@ -111,6 +120,7 @@ public final class OpticalReceiver {
         known = Array(repeating: nil, count: count)
         knownCount = 0
         mixed = []
+        heldIndexes = 0
         finished = false
         updateProgress()
     }
@@ -134,15 +144,21 @@ public final class OpticalReceiver {
             learn(unknown.first!, data)
         default:
             guard !mixed.contains(where: { $0.unknown == unknown }) else { return .duplicate }
-            // Bounded: a hostile or very long stream can't grow memory without end.
+            // Bounded: a hostile or very long stream can't grow memory without end. The oldest
+            // frames go first, to keep at most 4096 frames and the budget of unknown indexes.
             let cap = max(16, min(4 * session.count, 4096))
-            if mixed.count >= cap { mixed.removeFirst() }
+            let budget = Self.heldIndexesPerFragment * session.count
+            while !mixed.isEmpty, mixed.count >= cap || heldIndexes + unknown.count > budget {
+                heldIndexes -= mixed.removeFirst().unknown.count
+            }
             mixed.append(Mixed(unknown: unknown, data: data))
+            heldIndexes += unknown.count
         }
         updateProgress()
         guard knownCount == session.count else { return .progress(progress!) }
         finished = true
         mixed = []
+        heldIndexes = 0
         var message = Data(capacity: session.count * session.fragmentSize)
         for fragment in known { message.append(fragment!) }
         message = message.prefix(session.length)
@@ -168,7 +184,9 @@ public final class OpticalReceiver {
                 }
                 entry.data.xor(known[solved]!)
                 entry.unknown.remove(solved)
+                heldIndexes -= 1
                 if entry.unknown.count == 1 {
+                    heldIndexes -= 1
                     let next = entry.unknown.first!
                     if known[next] == nil {
                         known[next] = entry.data

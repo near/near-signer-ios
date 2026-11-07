@@ -190,6 +190,8 @@ private struct ResponseView: View {
         switch response.status {
         case .ok: return nil
         case .parseFailed: return "The request couldn't be decoded, so nothing was signed."
+        case .invalidData: return "The codes don't hold a valid NEAR Signer request, so nothing was signed."
+        case .insNotSupported: return "The computer asked for something NEAR Signer doesn't do, so nothing was signed."
         case .badPath: return "The computer asked for a key outside NEAR's derivation paths, so nothing was signed."
         case .publicKeyMismatch: return "The transaction names a key this phone doesn't have for that account, so nothing was signed."
         case .locked: return "The key couldn't be unlocked, so nothing was signed."

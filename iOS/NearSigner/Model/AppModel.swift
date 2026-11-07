@@ -70,6 +70,9 @@ final class AppModel {
     let cameraScanner = CameraScanner()
     @ObservationIgnored private let cameraReceiver = OpticalReceiver()
     @ObservationIgnored private var cameraStartedAt: Date?
+    /// The scanned request on its way through the signer; cancelled when the app leaves the
+    /// foreground, which rejects its approval even before it is shown.
+    @ObservationIgnored private var cameraTask: Task<Void, Never>?
 
     // Settings (persisted)
     private(set) var appearance: AppAppearance
@@ -232,8 +235,10 @@ final class AppModel {
             transports.stop()
             endReceiving()
             if let pending = pendingRequest { resolve(pending.id, approved: false) }
-            // The camera stops too; a request already with the signer was just rejected above, and
-            // its outcome closes the transfer. An answer on screen stays, behind the lock screen.
+            // The camera stops too. A scanned request with the signer is cancelled, so it is
+            // rejected even if it is still being decoded, and its outcome closes the transfer. An
+            // answer on screen stays, behind the lock screen.
+            cameraTask?.cancel()
             if case .scanning = cameraTransfer { cancelCameraTransfer() }
             lock()
         }
@@ -778,16 +783,20 @@ final class AppModel {
         case let .complete(message):
             let sessionId = cameraReceiver.sessionId ?? 0
             cameraScanner.stop()
-            guard let request = OpticalRequest(message: message) else {
-                errorMessage = "This code isn't a NEAR Signer request."
-                startCameraTransfer()
+            cameraSpeed = nil
+            let request: OpticalRequest
+            switch OpticalRequest.parse(message) {
+            case let .success(parsed):
+                request = parsed
+            case let .failure(status):
+                // Answered like Bluetooth, so the computer learns why and stops showing the codes.
+                cameraTransfer = .response(OpticalResponse(sessionId: sessionId, status: status, result: Data()))
                 return
             }
             cameraTransfer = .processing
-            cameraSpeed = nil
             // The same path as a Bluetooth request from here: decode, show, approve, unlock, sign.
             let service = self.service!
-            Task.detached { [weak self] in
+            cameraTask = Task.detached { [weak self] in
                 let result: Result<Data, StatusWord>
                 if let kind = request.signKind {
                     result = await service.sign(kind: kind, path: request.path, payload: request.payload, transport: "Camera")
@@ -800,6 +809,7 @@ final class AppModel {
     }
 
     private func cameraFinished(sessionId: UInt32, _ result: Result<Data, StatusWord>) {
+        cameraTask = nil
         guard cameraTransfer == .processing else { return }
         switch result {
         case let .success(data):

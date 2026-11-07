@@ -470,6 +470,47 @@ final class AuditRegressionTests: XCTestCase {
         XCTAssertEqual(SignerService.readable(Plain.broken), "broken")
     }
 
+    // MARK: Camera transfer
+
+    /// A hostile screen declares 65 535 one-byte fragments and shows mixed frames that mix
+    /// thousands of them: each kept frame costs a set that size, and 4096 kept frames would cost
+    /// gigabytes. The kept frames hold at most 16 unknown indexes per fragment in all; the oldest
+    /// go first, and frames that mix a few fragments are kept as before.
+    func testMixedFramesHoldABoundedNumberOfIndexes() throws {
+        let count = OpticalFrame.maxFragmentCount
+        let budget = OpticalReceiver.heldIndexesPerFragment * count
+        let sender = try OpticalSender(message: Data(repeating: 0x5A, count: count), sessionId: 77, fragmentSize: 1)
+        let receiver = OpticalReceiver()
+        var fed = 0
+        var narrow = 0
+        // Odd blocks of K frames are the mixed ones; nothing is known, so nothing peels.
+        for block in stride(from: 1, to: 12, by: 2) where fed <= budget {
+            for sequence in UInt32(block * count)..<UInt32((block + 1) * count) {
+                let degree = Fountain.indexes(sessionId: 77, sequence: sequence, fragmentCount: count).count
+                if degree > 1000 {
+                    _ = receiver.receive(sender.frame(sequence).text)
+                    fed += degree
+                    XCTAssertLessThanOrEqual(receiver.heldIndexes, budget)
+                } else if (2...8).contains(degree), narrow < 20 {
+                    _ = receiver.receive(sender.frame(sequence).text)
+                    narrow += 1
+                }
+            }
+        }
+        XCTAssertGreaterThan(fed, budget, "frames mixing more than the budget were shown")
+        XCTAssertGreaterThan(receiver.heldIndexes, budget - count, "kept while they fit")
+        XCTAssertLessThanOrEqual(receiver.heldIndexes, budget)
+
+        // A narrow frame still gets in, pushing out the oldest wide ones.
+        let sequence = try XCTUnwrap((UInt32(13 * count)..<UInt32(14 * count)).first {
+            Fountain.indexes(sessionId: 77, sequence: $0, fragmentCount: count).count == 2
+        })
+        let before = receiver.heldIndexes
+        _ = receiver.receive(sender.frame(sequence).text)
+        XCTAssertLessThanOrEqual(receiver.heldIndexes, budget)
+        XCTAssertNotEqual(receiver.heldIndexes, before)
+    }
+
     func testSecretBytes() {
         let a = SecretBytes(Data([1, 2, 3]))
         XCTAssertEqual(a, SecretBytes([1, 2, 3] as [UInt8]))

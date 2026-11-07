@@ -24,28 +24,34 @@ public struct OpticalRequest: Equatable, Sendable {
         self.payload = payload
     }
 
-    /// Nil if the message is too short, names an unknown instruction or a path that isn't a NEAR
-    /// account path (5 hardened levels under 44'/397', as the APDUs require), asks for a public
-    /// key with a payload, or carries a compressed payload that doesn't inflate to exactly the
-    /// length it declares (1 to `NearAPDU.maxPayload` bytes).
+    /// Nil if `parse` refuses the message.
     public init?(message: Data) {
+        guard case let .success(request) = OpticalRequest.parse(message) else { return nil }
+        self = request
+    }
+
+    /// The request, or the status word the phone answers instead, as over Bluetooth: `6D00` for an
+    /// unknown instruction, `B00B` for a path that isn't a NEAR account path (5 hardened levels
+    /// under 44'/397', as the APDUs require), and `6A80` for a message too short, a public key
+    /// request with a payload, or a compressed payload that doesn't inflate to exactly the length
+    /// it declares (1 to `NearAPDU.maxPayload` bytes).
+    public static func parse(_ message: Data) -> Result<OpticalRequest, StatusWord> {
         let bytes = Data(message)
         let headerLength = 1 + NearAPDU.pathLength
-        guard bytes.count >= headerLength, let kind = Kind(rawValue: bytes[0] & ~OpticalRequest.compressedFlag),
-              let path = BIP32Path(serialized: bytes.subdata(in: 1..<headerLength)),
-              AccountBook.isValidAccountPath(path) else { return nil }
+        guard bytes.count >= headerLength else { return .failure(.invalidData) }
+        guard let kind = Kind(rawValue: bytes[0] & ~OpticalRequest.compressedFlag) else { return .failure(.insNotSupported) }
+        guard let path = BIP32Path(serialized: bytes.subdata(in: 1..<headerLength)),
+              AccountBook.isValidAccountPath(path) else { return .failure(.badPath) }
         var payload = bytes.subdata(in: headerLength..<bytes.count)
         if bytes[0] & OpticalRequest.compressedFlag != 0 {
-            guard kind != .publicKey, payload.count >= 4 else { return nil }
+            guard kind != .publicKey, payload.count >= 4 else { return .failure(.invalidData) }
             let length = Int(payload.prefix(4).reduce(UInt32(0)) { $0 << 8 | UInt32($1) })
             guard length >= 1, length <= NearAPDU.maxPayload,
-                  let inflated = try? Inflate.inflate(payload.dropFirst(4), expectedLength: length) else { return nil }
+                  let inflated = try? Inflate.inflate(payload.dropFirst(4), expectedLength: length) else { return .failure(.invalidData) }
             payload = inflated
         }
-        if kind == .publicKey, !payload.isEmpty { return nil }
-        self.kind = kind
-        self.path = path
-        self.payload = payload
+        if kind == .publicKey, !payload.isEmpty { return .failure(.invalidData) }
+        return .success(OpticalRequest(kind: kind, path: path, payload: payload))
     }
 
     public var message: Data {

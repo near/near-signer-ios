@@ -369,6 +369,7 @@ fn status_message(status: u16) -> &'static str {
         0xB00D => "the transaction's key is not the phone's key at that path",
         0x5515 => "no key on the phone",
         0x6A80 => "invalid data",
+        0x6D00 => "the phone doesn't know this request",
         0x6601 => "the phone is busy with another request",
         _ => "unknown status word",
     }
@@ -594,6 +595,12 @@ struct Mixed {
     data: Vec<u8>,
 }
 
+/// Unknown fragment indexes the kept mixed frames may hold in all, per fragment of the message.
+/// Each costs a set entry, so without a budget a hostile screen could declare 65 535 one-byte
+/// fragments and show frames mixing tens of thousands of them: gigabytes across the kept frames.
+/// An honest transfer stays far below it (frames mix about ln K fragments on average).
+const HELD_INDEXES_PER_FRAGMENT: usize = 16;
+
 /// The receiving side (the phone's, or a test's): fed the text of every QR code seen, it recovers
 /// the message by peeling. Mirrors the Swift receiver rule for rule.
 #[derive(Default)]
@@ -602,6 +609,8 @@ pub struct Receiver {
     known: Vec<Option<Vec<u8>>>,
     known_count: usize,
     mixed: Vec<Mixed>,
+    /// Unknown fragment indexes held across `mixed`.
+    held_indexes: usize,
     finished: bool,
     progress: Option<Progress>,
     other_session_id: Option<u32>,
@@ -677,6 +686,7 @@ impl Receiver {
         self.known = vec![None; count];
         self.known_count = 0;
         self.mixed.clear();
+        self.held_indexes = 0;
         self.finished = false;
         self.update_progress();
     }
@@ -706,11 +716,17 @@ impl Receiver {
                 if self.mixed.iter().any(|entry| entry.unknown == unknown) {
                     return Outcome::Duplicate;
                 }
-                // Bounded: a hostile or very long stream can't grow memory without end.
+                // Bounded: a hostile or very long stream can't grow memory without end. The
+                // oldest frames go first, to keep at most 4096 frames and the budget of unknown
+                // indexes.
                 let cap = (4 * count).clamp(16, 4096);
-                if self.mixed.len() >= cap {
-                    self.mixed.remove(0);
+                let budget = HELD_INDEXES_PER_FRAGMENT * count;
+                while !self.mixed.is_empty()
+                    && (self.mixed.len() >= cap || self.held_indexes + unknown.len() > budget)
+                {
+                    self.held_indexes -= self.mixed.remove(0).unknown.len();
                 }
+                self.held_indexes += unknown.len();
                 self.mixed.push(Mixed { unknown, data });
             }
         }
@@ -725,6 +741,7 @@ impl Receiver {
             .expect("session");
         self.finished = true;
         self.mixed.clear();
+        self.held_indexes = 0;
         let mut message: Vec<u8> = Vec::with_capacity(count * fragment_size);
         for fragment in &self.known {
             message.extend_from_slice(fragment.as_ref().expect("every fragment is known"));
@@ -754,8 +771,10 @@ impl Receiver {
                     remaining.push(entry);
                     continue;
                 }
+                self.held_indexes -= 1;
                 xor_into(&mut entry.data, &solved_data);
                 if entry.unknown.len() == 1 {
+                    self.held_indexes -= 1;
                     let next = *entry.unknown.iter().next().expect("one unknown");
                     if self.known[next].is_none() {
                         self.known[next] = Some(entry.data);
@@ -768,6 +787,19 @@ impl Receiver {
             }
             self.mixed = remaining;
         }
+    }
+
+    /// Unknown fragment indexes held across the kept mixed frames (for tests of the bound).
+    #[cfg(test)]
+    fn held_indexes(&self) -> usize {
+        debug_assert_eq!(
+            self.held_indexes,
+            self.mixed
+                .iter()
+                .map(|entry| entry.unknown.len())
+                .sum::<usize>()
+        );
+        self.held_indexes
     }
 
     fn update_progress(&mut self) {
@@ -1866,6 +1898,57 @@ mod tests {
         let mut receiver = Receiver::new();
         let (received, _) = transfer(&sender, &mut receiver, 0, |s| s % 5 != 2);
         assert_eq!(received, bytes);
+    }
+
+    /// The degree `fountain_indexes` draws first, without the shuffle: finding rare frames that
+    /// mix tens of thousands of fragments takes millions of draws.
+    fn fountain_degree(session_id: u32, sequence: u32, fragment_count: usize) -> usize {
+        if (sequence / fragment_count as u32) % 2 == 0 {
+            return 1;
+        }
+        let mut state = session_id ^ sequence.wrapping_mul(0x9E37_79B9);
+        if state == 0 {
+            state = 0x9E37_79B9;
+        }
+        state ^= state << 13;
+        state ^= state >> 17;
+        state ^= state << 5;
+        let u = u64::from(state);
+        ((u64::from(u32::MAX) / ((1u64 << 32) - u)) as usize + 1).min(fragment_count)
+    }
+
+    /// A hostile screen declares 65 535 one-byte fragments and shows mixed frames that mix tens
+    /// of thousands of them: each kept frame costs a set that size, and 4096 kept frames would be
+    /// gigabytes. The budget of unknown indexes (16 per fragment) evicts the oldest instead;
+    /// frames that mix a few fragments are still kept. (Shown at K = 8192, which is faster; the
+    /// budget scales with K.)
+    #[test]
+    fn mixed_frames_are_bounded_by_their_unknown_indexes() {
+        let count = 8192;
+        let budget = HELD_INDEXES_PER_FRAGMENT * count;
+        let sender = Sender::new(vec![0x5A; count], 77, 1).unwrap();
+        let mut receiver = Receiver::new();
+        // 40 frames of more than 4096 fragments each: together over the budget.
+        let mut fed = 0;
+        let wide = (count as u32..)
+            .filter(|&sequence| fountain_degree(77, sequence, count) > 4096)
+            .take(40);
+        for (number, sequence) in wide.enumerate() {
+            let degree = fountain_degree(77, sequence, count);
+            assert_eq!(fountain_indexes(77, sequence, count).len(), degree);
+            receiver.receive(&sender.frame(sequence));
+            fed += degree;
+            assert!(receiver.held_indexes() <= budget, "frame {number}");
+        }
+        assert!(fed > budget, "the frames fed exceed the budget");
+        let narrow = (count as u32..)
+            .filter(|&sequence| (2..=8).contains(&fountain_degree(77, sequence, count)))
+            .take(20);
+        for sequence in narrow {
+            receiver.receive(&sender.frame(sequence));
+        }
+        assert!(receiver.held_indexes() > 0, "narrow frames are kept");
+        assert!(receiver.held_indexes() <= budget);
     }
 
     #[test]

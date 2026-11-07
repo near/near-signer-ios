@@ -198,9 +198,11 @@ The sender shows s = 0, 1, 2, … at a steady rate and never stops until the pho
 picks F for its display (around 500 bytes in a browser, 200–250 in a terminal; a message shorter
 than that is sent as one fragment of its own length) and the rate (up to 20 per second). The phone recovers fragments by peeling: a mixed frame whose other fragments are
 all known yields the missing one, which in turn may resolve earlier mixed frames (a mixed frame
-alone can't be used, which is why the plain fragments keep coming round). It checks the
-CRC-32 once all K fragments are known, and ignores frames whose session id differs from the
-transfer in progress (three in a row from a new session start over with it).
+alone can't be used, which is why the plain fragments keep coming round). It keeps at most 4K
+mixed frames (4 096 at most) holding at most 16K unknown fragment indexes in all, dropping the
+oldest first, so a hostile screen can't grow its memory without end. It checks the CRC-32 once
+all K fragments are known, and ignores frames whose session id differs from the transfer in
+progress (three in a row from a new session start over with it).
 
 **Message.** What the Ledger APDU would carry, with the instruction in front:
 
@@ -224,13 +226,16 @@ encoding (uppercase, no padding) of:
 |---|---|---|
 | 0 | 1 | type, `02` |
 | 1 | 4 | session id of the request |
-| 5 | 2 | status word: `9000`, or `B005`, `B00B`, `B00D`, `5515`, `6A80` as over Bluetooth |
+| 5 | 2 | status word: `9000`, or `B005`, `B00B`, `B00D`, `5515`, `6A80`, `6D00` as over Bluetooth |
 | 7 | … | 64-byte signature or 32-byte public key; empty on an error |
 | last | 4 | CRC-32 of everything before |
 
 The phone shows the same text under the code in groups of five characters, for typing on a computer
 without a camera; a reader accepts lower case, ignores spaces and hyphens, and reads `I`, `L` as `1`
-and `O` as `0`. A rejection (`6985`) shows no code: the person who rejected it is at the computer.
+and `O` as `0`. A rejection (`6985`) shows no code: the person who rejected it is at the computer. A message that
+isn't a request gets an answer too: `6D00` for an unknown instruction, `B00B` for a path outside
+NEAR's, `6A80` for one too short, a public key request with a payload, or a payload that doesn't
+inflate to its declared length.
 The computer checks the session id and the CRC, and verifies the signature against the account's
 key before using it.
 
@@ -459,7 +464,7 @@ appear only for the first export of a path and for rejections.
 ### 1. Without a phone (macOS or Linux)
 
 ```bash
-swift test                    # 93 tests: codecs, near-api-js fixtures, key derivation vectors,
+swift test                    # 127 tests: codecs, near-api-js fixtures, key derivation vectors,
                               # APDU sessions, BLE/TCP framing, wallets, accounts, recognizers
 scripts/test-all.sh           # + Python host e2e against the simulator
                               # + near-connect's real Ledger executor over emulated BLE (needs node)
@@ -640,7 +645,11 @@ facing you, outlines a code the moment it reads it, shakes it off when it is not
 answer, draws a check mark when the answer went through and closes itself, offers "Try again" when
 the camera could not start and "Switch camera" when there is more than one. On a phone or tablet
 Continue takes a photo of the code in place. Reading a photo and typing the letters under the code
-stay under it, Back brings the code up again, and a code pasted anywhere on the screen counts. Any other dapp
+stay under it, Back brings the code up again, and a code pasted anywhere on the screen counts. The
+executor fills in nothing a dapp left out: a message without a 32-byte nonce or a recipient, or an
+AddKey without a permission, is refused rather than signed with zeros or as a full-access key. It
+checks every signature with the browser's Ed25519 (WebCrypto) and refuses to go on in a browser
+without it. Any other dapp
 built on near-connect takes the same executor through the wallet list's Settings (the gear): paste
 the manifest from the top of `host/optical/executor/main.js`, with an executor URL the dapp can
 fetch and the camera page served next to it as HTML (a host such as GitHub Pages, or a local server
@@ -670,8 +679,9 @@ weeks old. Nothing is signed or published: signing needs the developer's own App
 
 Claude reviews each pull request when it's opened or marked ready for review, and again when a
 maintainer comments `@claude review` (`.github/workflows/claude-pr-review.yml`, with the
-instructions in `.github/prompts/pr-review.prompt.md`). It needs the `ANTHROPIC_API` secret, and
-it skips pull requests from forks.
+instructions in `.github/prompts/pr-review.prompt.md`). It needs the `ANTHROPIC_API` secret and
+fails with a message naming it when the secret is missing. It skips pull requests from forks, and
+Dependabot's until a maintainer asks (Dependabot runs get no Actions secrets).
 
 Formatting is checked, so run the formatter before committing:
 
@@ -700,7 +710,7 @@ format a few lines differently. `.editorconfig` gives editors, Xcode included, t
 
 Verified on Linux (Swift 6.2 + swift-crypto):
 
-- **Swift unit tests.** All 125 pass. Encodings match near-api-js byte for byte; delegate and
+- **Swift unit tests.** All 127 pass. Encodings match near-api-js byte for byte; delegate and
   NEP-413 digests match; BIP-39, SLIP-10 and near-seed-phrase keys match.
 - **Python e2e tests.** All 14 pass, including fast mode over TCP and emulated BLE (checked on the wire). They check signed transactions byte for byte against near-api-js.
 - **near-connect.** The real near-connect Ledger executor (fetched from GitHub) completed MTU
@@ -711,7 +721,7 @@ Verified on Linux (Swift 6.2 + swift-crypto):
 - **Camera transfer.** The JavaScript and Rust senders' frames, with 30% dropped and the rest
   reordered, reach `near-signer-sim optical`, which signs; the sender checks the answer and
   verifies the signature. A 300 KB contract deployment goes the same way, compressed, with 20%
-  loss. The three fountain-code implementations agree frame for frame; 13 Node and 17 Rust
+  loss. The three fountain-code implementations agree frame for frame; 16 Node and 19 Rust
   tests cover the codecs.
 
 Not verified, because there was no Mac or iPhone:
