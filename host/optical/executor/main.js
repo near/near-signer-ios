@@ -13,7 +13,7 @@
 //     "name": "NEAR Signer",
 //     "icon": "https://<your host>/icon.png",
 //     "description": "An iPhone as a hardware wallet, through QR codes: no Bluetooth, no USB.",
-//     "website": "https://github.com/Near-One/near-signer",
+//     "website": "https://github.com/near/near-signer-ios",
 //     "version": "1.0.0",
 //     "executor": "https://<your host>/near-signer-qr-executor.js",
 //     "type": "sandbox",

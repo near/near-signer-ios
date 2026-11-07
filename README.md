@@ -629,10 +629,6 @@ paste it on a Mac through Universal Clipboard. The tool prints the signature and
 the signed transaction for `near transaction send-signed-transaction`. The web page and the near-connect executor in
 `host/optical/` do the same in a browser.
 
-A dapp that uses near-connect's **near-cli-rs wallet** (near-cli-connect, which hands you a
-command to run) offers NEAR Signer as a signing method with the patch in `host/patches/`, with a
-Bluetooth or QR codes choice.
-
 **In a near-connect dapp.** Serve the folder (`python3 -m http.server -d host/optical 8080`) and
 open http://localhost:8080/dapp.html in Chrome or Edge: a small dapp that registers the executor
 as a near-connect debug wallet, with a message to sign, a transfer, and a contract deployment of
@@ -655,9 +651,7 @@ the manifest from the top of `host/optical/executor/main.js`, with an executor U
 fetch and the camera page served next to it as HTML (a host such as GitHub Pages, or a local server
 that sends CORS headers; GitHub's raw URLs serve the page as text), and Add. http://localhost:8080/
 is the standalone page, which reads the phone's answer with the computer's camera in place, or from
-a photo. With the patch in `host/patches/`, near-cli-rs itself
-gains `sign-with-near-signer-qr` (and `use-near-signer-qr` for the faucet-sponsored account
-creation), which shows the codes and takes the typed answer in place of a Ledger.
+a photo.
 
 ### 4. Continuous integration and formatting
 

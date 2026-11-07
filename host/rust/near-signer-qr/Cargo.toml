@@ -5,7 +5,7 @@ edition = "2021"
 rust-version = "1.85"
 license = "MIT"
 description = "Shows NEAR Signer requests as QR codes in a terminal and reads the answer"
-repository = "https://github.com/Near-One/near-signer"
+repository = "https://github.com/near/near-signer-ios"
 keywords = ["near", "qr", "hardware-wallet", "signing"]
 categories = ["command-line-utilities", "cryptography::cryptocurrencies"]
 

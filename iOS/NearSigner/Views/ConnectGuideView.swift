@@ -11,12 +11,6 @@ struct ConnectGuideView: View {
           --seed-phrase-hd-path "44'/397'/0'/0'/1'" bluetooth send
         """
 
-    private let cliQrExample = """
-        near tokens alice.near send-near bob.near '1 NEAR' \\
-          network-config mainnet sign-with-near-signer-qr \\
-          --seed-phrase-hd-path "44'/397'/0'/0'/1'" send
-        """
-
     var body: some View {
         NavigationStack {
             List {
@@ -71,11 +65,6 @@ struct ConnectGuideView: View {
                         Text(cliExample)
                             .font(.caption.monospaced())
                             .valueMenu(cliExample, title: "near-cli-rs example")
-                        Text("Without Bluetooth, a near-cli-rs with sign-with-near-signer-qr shows the codes in the terminal and takes the answer typed:")
-                            .font(.subheadline)
-                        Text(cliQrExample)
-                            .font(.caption.monospaced())
-                            .valueMenu(cliQrExample, title: "near-cli-rs example (QR codes)")
                         Text(ValueMenuHint.text)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
