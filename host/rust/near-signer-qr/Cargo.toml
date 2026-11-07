@@ -11,7 +11,7 @@ categories = ["command-line-utilities", "cryptography::cryptocurrencies"]
 
 [dependencies]
 crc32fast = "1"
-ed25519-dalek = { version = "2", default-features = false }
+ed25519-dalek = { version = "3", default-features = false }
 flate2 = "1"
 libc = "0.2"
 qrcode = { version = "0.14", default-features = false }
