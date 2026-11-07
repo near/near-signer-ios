@@ -12,9 +12,7 @@ public enum Fountain {
         let count = UInt32(fragmentCount)
         if (sequence / count) % 2 == 0 { return [Int(sequence % count)] }
         var generator = XorShift32(seed: sessionId ^ (sequence &* 0x9E37_79B9))
-        // Ideal soliton distribution: half the frames mix 2 fragments, a sixth 3, a twelfth 4...
-        let u = UInt64(generator.next())
-        let degree = min(Int((UInt64(UInt32.max)) / ((UInt64(1) << 32) - u)) + 1, fragmentCount)
+        let degree = mixedDegree(&generator, fragmentCount: fragmentCount)
         // A partial Fisher-Yates shuffle of 0..<fragmentCount, stored sparsely: only the swapped
         // positions are kept, so a large transfer doesn't allocate the whole array per frame.
         var swapped: [Int: Int] = [:]
@@ -29,6 +27,21 @@ public enum Fountain {
             chosen.append(valueAtJ)
         }
         return chosen
+    }
+
+    /// How many fragments frame `sequence` mixes, from the generator's first draw only: cheap
+    /// even when the frame mixes thousands.
+    public static func degree(sessionId: UInt32, sequence: UInt32, fragmentCount: Int) -> Int {
+        precondition(fragmentCount > 0)
+        if (sequence / UInt32(fragmentCount)) % 2 == 0 { return 1 }
+        var generator = XorShift32(seed: sessionId ^ (sequence &* 0x9E37_79B9))
+        return mixedDegree(&generator, fragmentCount: fragmentCount)
+    }
+
+    /// Ideal soliton distribution: half the frames mix 2 fragments, a sixth 3, a twelfth 4...
+    private static func mixedDegree(_ generator: inout XorShift32, fragmentCount: Int) -> Int {
+        let u = UInt64(generator.next())
+        return min(Int(UInt64(UInt32.max) / ((UInt64(1) << 32) - u)) + 1, fragmentCount)
     }
 }
 

@@ -4,6 +4,8 @@ import { test } from "node:test";
 import zlib from "node:zlib";
 import {
     COMPRESSED_FLAG,
+    HELD_INDEXES_PER_FRAGMENT,
+    MAX_MIXED_DEGREE,
     Receiver,
     Sender,
     base32Decode,
@@ -13,6 +15,7 @@ import {
     crc32,
     encodeRequest,
     encodeResponse,
+    fountainDegree,
     fountainIndexes,
     grouped,
     inflateRequest,
@@ -270,59 +273,46 @@ test("receiver handles one fragment and a large message", () => {
     assert.deepEqual(result.message, message);
 });
 
-test("receiver holds a bounded number of unknown fragment indexes", () => {
-    // How many fragments frame `s` mixes: the first draw of fountainIndexes, without choosing them
-    // (fountainIndexes itself walks all 65 535 fragments).
-    const degreeOf = (sessionId, s, count) => {
-        if (Math.floor(s / count) % 2 === 0) return 1;
-        let x = ((sessionId >>> 0) ^ Math.imul(s, 0x9e3779b9)) >>> 0;
-        if (x === 0) x = 0x9e3779b9;
-        x ^= x << 13;
-        x ^= x >>> 17;
-        x ^= x << 5;
-        x >>>= 0;
-        return Math.min(Math.floor((2 ** 32 - 1) / (2 ** 32 - x)) + 1, count);
-    };
-    const heldOf = (receiver) => receiver.session.mixed.reduce((n, part) => n + part.indexes.size, 0);
-
-    // A hostile screen declares 65 535 one-byte fragments and shows frames that mix thousands of
-    // them. Narrow frames are kept, and what the wide ones add stays within 16 indexes per fragment.
+test("receiver skips frames that mix more than 1024 fragments", () => {
+    // A hostile screen declares 65 535 one-byte fragments and holds up codes that mix thousands of
+    // them: they are skipped before their fragments are chosen, and narrow frames are still kept.
     const count = 65535;
     const sender = new Sender(new Uint8Array(count).fill(0x5a), { sessionId: 77, fragmentSize: 1 });
     const receiver = new Receiver();
-    let narrow = 0;
-    for (let s = count; narrow < 20; s++) {
-        const degree = degreeOf(77, s, count);
-        if (degree < 2 || degree > 8) continue;
-        receiver.receive(sender.frame(s));
-        narrow += 1;
-    }
-    assert.ok(receiver.session.held > 0, "narrow frames are kept");
     let wide = 0;
     for (let s = count; wide < 20; s++) {
-        const degree = degreeOf(77, s, count);
-        if (degree <= 1000) continue;
-        assert.equal(fountainIndexes(77, s, count).length, degree);
-        receiver.receive(sender.frame(s));
+        const degree = fountainDegree(77, s, count);
+        if (degree <= MAX_MIXED_DEGREE) continue;
+        if (wide < 3) assert.equal(fountainIndexes(77, s, count).length, degree);
+        assert.equal(receiver.receive(sender.frame(s)).kind, "duplicate");
         wide += 1;
-        assert.ok(receiver.session.held <= 16 * count);
-        assert.equal(receiver.session.held, heldOf(receiver));
     }
+    assert.equal(receiver.session.held, 0);
+    for (let s = count; ; s++) {
+        if (fountainDegree(77, s, count) !== 3) continue;
+        receiver.receive(sender.frame(s));
+        break;
+    }
+    assert.equal(receiver.session.held, 3, "a frame of a few fragments is kept");
+});
 
-    // Past the budget the oldest frames go: wide frames until twice the budget has been shown.
+test("receiver holds a bounded number of unknown fragment indexes", () => {
+    // Frames of up to 1024 fragments are kept while they fit, 16 indexes per fragment in all; past
+    // the budget the oldest go, here until twice the budget has been shown.
+    const heldOf = (receiver) => receiver.session.mixed.reduce((n, part) => n + part.indexes.size, 0);
     const small = 2000;
     const bounded = new Sender(new Uint8Array(small).fill(0x5a), { sessionId: 78, fragmentSize: 1 });
     const other = new Receiver();
     let shown = 0;
-    for (let s = small; shown <= 2 * 16 * small; s++) {
-        const degree = degreeOf(78, s, small);
-        if (degree <= 200) continue;
+    for (let s = small; shown <= 2 * HELD_INDEXES_PER_FRAGMENT * small; s++) {
+        const degree = fountainDegree(78, s, small);
+        if (degree <= 200 || degree > MAX_MIXED_DEGREE) continue;
         other.receive(bounded.frame(s));
         shown += degree;
-        assert.ok(other.session.held <= 16 * small, `holds ${other.session.held}`);
+        assert.ok(other.session.held <= HELD_INDEXES_PER_FRAGMENT * small, `holds ${other.session.held}`);
         assert.equal(other.session.held, heldOf(other));
     }
-    assert.ok(other.session.mixed.length > 0);
+    assert.ok(other.session.held > HELD_INDEXES_PER_FRAGMENT * small - MAX_MIXED_DEGREE, "kept while they fit");
 });
 
 test("receiver bounds the mixed frames it keeps", () => {

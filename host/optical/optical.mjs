@@ -135,23 +135,39 @@ export function fountainIndexes(sessionId, sequence, fragmentCount) {
     // Even blocks of K frames carry the fragments in order, so every fragment passes by within 2K
     // frames whenever the phone starts watching; odd blocks mix them to fill in what was missed.
     if (Math.floor(sequence / fragmentCount) % 2 === 0) return [sequence % fragmentCount];
-    let x = ((sessionId >>> 0) ^ Math.imul(sequence, 0x9e3779b9)) >>> 0;
-    if (x === 0) x = 0x9e3779b9;
-    const next = () => {
-        x ^= x << 13;
-        x ^= x >>> 17;
-        x ^= x << 5;
-        x >>>= 0;
-        return x;
-    };
-    const u = next();
-    const degree = Math.min(Math.floor((2 ** 32 - 1) / (2 ** 32 - u)) + 1, fragmentCount);
+    const next = fountainGenerator(sessionId, sequence);
+    const degree = solitonDegree(next(), fragmentCount);
     const indexes = Array.from({ length: fragmentCount }, (_, i) => i);
     for (let i = 0; i < degree; i++) {
         const j = i + (next() % (fragmentCount - i));
         [indexes[i], indexes[j]] = [indexes[j], indexes[i]];
     }
     return indexes.slice(0, degree);
+}
+
+/// How many fragments frame `sequence` mixes, from the generator's first draw only: cheap even
+/// when the frame mixes thousands.
+export function fountainDegree(sessionId, sequence, fragmentCount) {
+    if (Math.floor(sequence / fragmentCount) % 2 === 0) return 1;
+    return solitonDegree(fountainGenerator(sessionId, sequence)(), fragmentCount);
+}
+
+/// xorshift32, seeded so that both sides derive the same sequence.
+function fountainGenerator(sessionId, sequence) {
+    let x = ((sessionId >>> 0) ^ Math.imul(sequence, 0x9e3779b9)) >>> 0;
+    if (x === 0) x = 0x9e3779b9;
+    return () => {
+        x ^= x << 13;
+        x ^= x >>> 17;
+        x ^= x << 5;
+        x >>>= 0;
+        return x;
+    };
+}
+
+/// Ideal soliton distribution: half the mixed frames combine 2 fragments, a sixth 3, and so on.
+function solitonDegree(u, fragmentCount) {
+    return Math.min(Math.floor((2 ** 32 - 1) / (2 ** 32 - u)) + 1, fragmentCount);
 }
 
 function xorInto(target, source) {
@@ -250,6 +266,12 @@ export function parseFrame(text) {
 /// it (frames mix about ln K fragments on average).
 export const HELD_INDEXES_PER_FRAGMENT = 16;
 
+/// A mixed frame of more fragments than this is skipped before they are chosen, as in the phone's
+/// receiver: choosing them walks all the fragments, at every read of a code a hostile screen can
+/// hold still. Under the ideal soliton about 0.1% of mixed frames mix more, and they almost never
+/// peel.
+export const MAX_MIXED_DEGREE = 1024;
+
 /// Collects frames and recovers the message by peeling: a mixed frame whose other fragments are
 /// known yields the missing one, which may in turn resolve earlier mixed frames.
 export class Receiver {
@@ -294,6 +316,9 @@ export class Receiver {
             return { kind: "invalid", reason: "header" };
         }
         if (session.seen.has(frame.sequence)) return { kind: "duplicate", ...this.progress };
+        if (fountainDegree(session.sessionId, frame.sequence, session.fragmentCount) > MAX_MIXED_DEGREE) {
+            return { kind: "duplicate", ...this.progress };
+        }
         session.seen.add(frame.sequence);
         this.add(fountainIndexes(session.sessionId, frame.sequence, session.fragmentCount), frame.data);
         if (session.known.size < session.fragmentCount) return { kind: "progress", ...this.progress };

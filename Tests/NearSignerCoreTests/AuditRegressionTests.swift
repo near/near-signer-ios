@@ -472,43 +472,56 @@ final class AuditRegressionTests: XCTestCase {
 
     // MARK: Camera transfer
 
-    /// A hostile screen declares 65 535 one-byte fragments and shows mixed frames that mix
-    /// thousands of them: each kept frame costs a set that size, and 4096 kept frames would cost
-    /// gigabytes. The kept frames hold at most 16 unknown indexes per fragment in all; the oldest
-    /// go first, and frames that mix a few fragments are kept as before.
-    func testMixedFramesHoldABoundedNumberOfIndexes() throws {
+    /// A hostile screen declares 65 535 one-byte fragments and holds up codes that mix tens of
+    /// thousands of them. Choosing their fragments costs a dictionary and a set that size on the
+    /// main actor at every camera read, and keeping them would cost gigabytes: frames that mix
+    /// more than 1024 fragments are skipped before their fragments are chosen.
+    func testFramesMixingThousandsOfFragmentsAreSkipped() throws {
         let count = OpticalFrame.maxFragmentCount
-        let budget = OpticalReceiver.heldIndexesPerFragment * count
         let sender = try OpticalSender(message: Data(repeating: 0x5A, count: count), sessionId: 77, fragmentSize: 1)
         let receiver = OpticalReceiver()
+        let wide = (UInt32(count)..<UInt32(2 * count))
+            .filter { Fountain.degree(sessionId: 77, sequence: $0, fragmentCount: count) > OpticalReceiver.maxMixedDegree }
+            .prefix(20)
+        XCTAssertEqual(wide.count, 20)
+        for sequence in wide.prefix(3) {
+            XCTAssertEqual(Fountain.indexes(sessionId: 77, sequence: sequence, fragmentCount: count).count,
+                           Fountain.degree(sessionId: 77, sequence: sequence, fragmentCount: count))
+        }
+        let texts = wide.map { sender.frame($0).text }
+        let started = Date()
+        for _ in 0..<50 {
+            for text in texts { XCTAssertEqual(receiver.receive(text), .duplicate) }
+        }
+        XCTAssertEqual(receiver.heldIndexes, 0)
+        XCTAssertLessThan(Date().timeIntervalSince(started), 2, "1000 reads of wide codes")
+        let narrow = try XCTUnwrap((UInt32(count)..<UInt32(2 * count)).first {
+            Fountain.degree(sessionId: 77, sequence: $0, fragmentCount: count) == 3
+        })
+        _ = receiver.receive(sender.frame(narrow).text)
+        XCTAssertEqual(receiver.heldIndexes, 3, "a frame of a few fragments is kept")
+    }
+
+    /// Frames of up to 1024 fragments are kept while they fit: at most 16 unknown indexes per
+    /// fragment in all, the oldest frames going first.
+    func testMixedFramesHoldABoundedNumberOfIndexes() throws {
+        let count = 4096
+        let budget = OpticalReceiver.heldIndexesPerFragment * count
+        let sender = try OpticalSender(message: Data(repeating: 0x5A, count: count), sessionId: 78, fragmentSize: 1)
+        let receiver = OpticalReceiver()
         var fed = 0
-        var narrow = 0
         // Odd blocks of K frames are the mixed ones; nothing is known, so nothing peels.
-        for block in stride(from: 1, to: 12, by: 2) where fed <= budget {
+        for block in stride(from: 1, to: 40, by: 2) where fed <= budget {
             for sequence in UInt32(block * count)..<UInt32((block + 1) * count) {
-                let degree = Fountain.indexes(sessionId: 77, sequence: sequence, fragmentCount: count).count
-                if degree > 1000 {
-                    _ = receiver.receive(sender.frame(sequence).text)
-                    fed += degree
-                    XCTAssertLessThanOrEqual(receiver.heldIndexes, budget)
-                } else if (2...8).contains(degree), narrow < 20 {
-                    _ = receiver.receive(sender.frame(sequence).text)
-                    narrow += 1
-                }
+                let degree = Fountain.degree(sessionId: 78, sequence: sequence, fragmentCount: count)
+                guard (100...OpticalReceiver.maxMixedDegree).contains(degree) else { continue }
+                _ = receiver.receive(sender.frame(sequence).text)
+                fed += degree
+                XCTAssertLessThanOrEqual(receiver.heldIndexes, budget)
             }
         }
         XCTAssertGreaterThan(fed, budget, "frames mixing more than the budget were shown")
-        XCTAssertGreaterThan(receiver.heldIndexes, budget - count, "kept while they fit")
-        XCTAssertLessThanOrEqual(receiver.heldIndexes, budget)
-
-        // A narrow frame still gets in, pushing out the oldest wide ones.
-        let sequence = try XCTUnwrap((UInt32(13 * count)..<UInt32(14 * count)).first {
-            Fountain.indexes(sessionId: 77, sequence: $0, fragmentCount: count).count == 2
-        })
-        let before = receiver.heldIndexes
-        _ = receiver.receive(sender.frame(sequence).text)
-        XCTAssertLessThanOrEqual(receiver.heldIndexes, budget)
-        XCTAssertNotEqual(receiver.heldIndexes, before)
+        XCTAssertGreaterThan(receiver.heldIndexes, budget - OpticalReceiver.maxMixedDegree, "kept while they fit")
     }
 
     func testSecretBytes() {

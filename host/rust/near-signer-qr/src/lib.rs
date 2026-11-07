@@ -263,18 +263,8 @@ pub fn fountain_indexes(session_id: u32, sequence: u32, fragment_count: usize) -
     if (sequence / count) % 2 == 0 {
         return vec![(sequence % count) as usize];
     }
-    let mut state = session_id ^ sequence.wrapping_mul(0x9E37_79B9);
-    if state == 0 {
-        state = 0x9E37_79B9;
-    }
-    let mut next = move || {
-        state ^= state << 13;
-        state ^= state >> 17;
-        state ^= state << 5;
-        state
-    };
-    let u = u64::from(next());
-    let degree = ((u64::from(u32::MAX) / ((1u64 << 32) - u)) as usize + 1).min(fragment_count);
+    let mut next = fountain_generator(session_id, sequence);
+    let degree = soliton_degree(next(), fragment_count);
     // Only the swapped positions of 0..fragment_count are kept, so a large transfer doesn't
     // allocate the whole array per frame.
     let mut swapped: HashMap<usize, usize> = HashMap::new();
@@ -288,6 +278,35 @@ pub fn fountain_indexes(session_id: u32, sequence: u32, fragment_count: usize) -
         chosen.push(at_j);
     }
     chosen
+}
+
+/// How many fragments frame `sequence` mixes, from the generator's first draw only: cheap even
+/// when the frame mixes thousands.
+pub fn fountain_degree(session_id: u32, sequence: u32, fragment_count: usize) -> usize {
+    assert!(fragment_count > 0, "a transfer has at least one fragment");
+    if (sequence / fragment_count as u32) % 2 == 0 {
+        return 1;
+    }
+    soliton_degree(fountain_generator(session_id, sequence)(), fragment_count)
+}
+
+/// xorshift32, seeded so that both sides derive the same sequence.
+fn fountain_generator(session_id: u32, sequence: u32) -> impl FnMut() -> u32 {
+    let mut state = session_id ^ sequence.wrapping_mul(0x9E37_79B9);
+    if state == 0 {
+        state = 0x9E37_79B9;
+    }
+    move || {
+        state ^= state << 13;
+        state ^= state >> 17;
+        state ^= state << 5;
+        state
+    }
+}
+
+/// Ideal soliton distribution: half the mixed frames combine 2 fragments, a sixth 3, and so on.
+fn soliton_degree(u: u32, fragment_count: usize) -> usize {
+    ((u64::from(u32::MAX) / ((1u64 << 32) - u64::from(u))) as usize + 1).min(fragment_count)
 }
 
 #[derive(Debug)]
@@ -601,6 +620,12 @@ struct Mixed {
 /// An honest transfer stays far below it (frames mix about ln K fragments on average).
 const HELD_INDEXES_PER_FRAGMENT: usize = 16;
 
+/// A mixed frame of more fragments than this is skipped before they are chosen, as in the phone's
+/// receiver: choosing them costs a map and a set that size at every read of a code a hostile
+/// screen can hold still. Under the ideal soliton about 0.1% of mixed frames mix more, and they
+/// almost never peel.
+const MAX_MIXED_DEGREE: usize = 1024;
+
 /// The receiving side (the phone's, or a test's): fed the text of every QR code seen, it recovers
 /// the message by peeling. Mirrors the Swift receiver rule for rule.
 #[derive(Default)]
@@ -696,6 +721,9 @@ impl Receiver {
             Some(session) => (session.id, session.count),
             None => return Outcome::NotAFrame,
         };
+        if fountain_degree(id, frame.sequence, count) > MAX_MIXED_DEGREE {
+            return Outcome::Duplicate;
+        }
         let mut data = frame.data;
         let mut unknown = HashSet::new();
         for index in fountain_indexes(id, frame.sequence, count) {
@@ -1900,55 +1928,72 @@ mod tests {
         assert_eq!(received, bytes);
     }
 
-    /// The degree `fountain_indexes` draws first, without the shuffle: finding rare frames that
-    /// mix tens of thousands of fragments takes millions of draws.
-    fn fountain_degree(session_id: u32, sequence: u32, fragment_count: usize) -> usize {
-        if (sequence / fragment_count as u32) % 2 == 0 {
-            return 1;
-        }
-        let mut state = session_id ^ sequence.wrapping_mul(0x9E37_79B9);
-        if state == 0 {
-            state = 0x9E37_79B9;
-        }
-        state ^= state << 13;
-        state ^= state >> 17;
-        state ^= state << 5;
-        let u = u64::from(state);
-        ((u64::from(u32::MAX) / ((1u64 << 32) - u)) as usize + 1).min(fragment_count)
-    }
-
-    /// A hostile screen declares 65 535 one-byte fragments and shows mixed frames that mix tens
-    /// of thousands of them: each kept frame costs a set that size, and 4096 kept frames would be
-    /// gigabytes. The budget of unknown indexes (16 per fragment) evicts the oldest instead;
-    /// frames that mix a few fragments are still kept. (Shown at K = 8192, which is faster; the
-    /// budget scales with K.)
+    /// A hostile screen declares 65 535 one-byte fragments and holds up codes that mix thousands
+    /// of them: they are skipped before their fragments are chosen, and a frame of a few
+    /// fragments is still kept.
     #[test]
-    fn mixed_frames_are_bounded_by_their_unknown_indexes() {
-        let count = 8192;
-        let budget = HELD_INDEXES_PER_FRAGMENT * count;
+    fn frames_mixing_thousands_of_fragments_are_skipped() {
+        let count = 65_535;
         let sender = Sender::new(vec![0x5A; count], 77, 1).unwrap();
         let mut receiver = Receiver::new();
-        // 40 frames of more than 4096 fragments each: together over the budget.
+        let wide: Vec<u32> = (count as u32..)
+            .filter(|&sequence| fountain_degree(77, sequence, count) > MAX_MIXED_DEGREE)
+            .take(20)
+            .collect();
+        for &sequence in wide.iter().take(3) {
+            assert_eq!(
+                fountain_indexes(77, sequence, count).len(),
+                fountain_degree(77, sequence, count)
+            );
+        }
+        for &sequence in &wide {
+            assert_eq!(
+                receiver.receive(&sender.frame(sequence)),
+                Outcome::Duplicate
+            );
+        }
+        assert_eq!(receiver.held_indexes(), 0);
+        let narrow = (count as u32..)
+            .find(|&sequence| fountain_degree(77, sequence, count) == 3)
+            .unwrap();
+        receiver.receive(&sender.frame(narrow));
+        assert_eq!(
+            receiver.held_indexes(),
+            3,
+            "a frame of a few fragments is kept"
+        );
+    }
+
+    /// Frames of up to 1024 fragments are kept while they fit: at most 16 unknown indexes per
+    /// fragment in all, the oldest frames going first.
+    #[test]
+    fn mixed_frames_are_bounded_by_their_unknown_indexes() {
+        let count = 4096;
+        let budget = HELD_INDEXES_PER_FRAGMENT * count;
+        let sender = Sender::new(vec![0x5A; count], 78, 1).unwrap();
+        let mut receiver = Receiver::new();
         let mut fed = 0;
-        let wide = (count as u32..)
-            .filter(|&sequence| fountain_degree(77, sequence, count) > 4096)
-            .take(40);
-        for (number, sequence) in wide.enumerate() {
-            let degree = fountain_degree(77, sequence, count);
-            assert_eq!(fountain_indexes(77, sequence, count).len(), degree);
+        // Odd blocks of K frames are the mixed ones; nothing is known, so nothing peels.
+        let mixed = (1..40u32)
+            .step_by(2)
+            .flat_map(|block| block * count as u32..(block + 1) * count as u32);
+        for sequence in mixed {
+            let degree = fountain_degree(78, sequence, count);
+            if !(100..=MAX_MIXED_DEGREE).contains(&degree) {
+                continue;
+            }
             receiver.receive(&sender.frame(sequence));
             fed += degree;
-            assert!(receiver.held_indexes() <= budget, "frame {number}");
+            assert!(receiver.held_indexes() <= budget, "sequence {sequence}");
+            if fed > budget {
+                break;
+            }
         }
         assert!(fed > budget, "the frames fed exceed the budget");
-        let narrow = (count as u32..)
-            .filter(|&sequence| (2..=8).contains(&fountain_degree(77, sequence, count)))
-            .take(20);
-        for sequence in narrow {
-            receiver.receive(&sender.frame(sequence));
-        }
-        assert!(receiver.held_indexes() > 0, "narrow frames are kept");
-        assert!(receiver.held_indexes() <= budget);
+        assert!(
+            receiver.held_indexes() > budget - MAX_MIXED_DEGREE,
+            "kept while they fit"
+        );
     }
 
     #[test]

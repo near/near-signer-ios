@@ -58,6 +58,13 @@ public final class OpticalReceiver {
     /// frames. An honest transfer stays far below it (frames mix about ln K fragments on average).
     static let heldIndexesPerFragment = 16
 
+    /// A mixed frame of more fragments than this is skipped before they are chosen. Choosing them
+    /// costs a dictionary and a set that size, on the main actor, every time the camera reads the
+    /// code: a hostile screen holding still a few codes that mix tens of thousands of 1-byte
+    /// fragments would freeze the app. Under the ideal soliton about 0.1% of mixed frames mix
+    /// more, and they almost never peel.
+    static let maxMixedDegree = 1024
+
     private var session: Session?
     private var known: [Data?] = []
     private var knownCount = 0
@@ -127,6 +134,8 @@ public final class OpticalReceiver {
 
     private func absorb(_ frame: OpticalFrame) -> Outcome {
         guard let session else { return .notAFrame }
+        let degree = Fountain.degree(sessionId: session.id, sequence: frame.sequence, fragmentCount: session.count)
+        guard degree <= Self.maxMixedDegree else { return .duplicate }
         let indexes = Fountain.indexes(sessionId: session.id, sequence: frame.sequence, fragmentCount: session.count)
         var data = frame.data
         var unknown = Set<Int>()
