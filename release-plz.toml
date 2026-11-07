@@ -1,0 +1,9 @@
+# release-plz settings for the near-signer-qr crate (.github/workflows/release-plz.yml).
+[workspace]
+# Publishing happens only when a release pull request is merged, never on another push to main
+# (the first 0.1.0 included: its release pull request adds the changelog).
+release_always = false
+# The repository is the iOS app's: the crate's tags carry its name, and its releases are on
+# crates.io and in host/rust/near-signer-qr/CHANGELOG.md, not on the GitHub releases page.
+git_tag_name = "near-signer-qr-v{{ version }}"
+git_release_enable = false

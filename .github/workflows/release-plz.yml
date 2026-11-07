@@ -1,0 +1,65 @@
+name: Release crate
+
+# release-plz versions and publishes the near-signer-qr crate (host/rust/near-signer-qr), the same
+# way as near-cli-rs and the other near crates: the organization's CARGO_REGISTRY_TOKEN publishes as
+# nearprotocol-ci, and NEARPROTOCOL_CI_PR_ACCESS opens the release pull requests (unlike
+# GITHUB_TOKEN, it lets CI run on them). On every push to main it
+# - opens or updates a "chore: release" pull request that bumps the crate's version and its
+#   CHANGELOG.md from the conventional commits touching the crate, and
+# - when the push is the merge of that pull request, publishes the crate and tags the commit
+#   near-signer-qr-v<version>. Nothing is published on any other push.
+# Settings are in release-plz.toml.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  release-plz:
+    name: Release near-signer-qr
+    if: github.repository == 'near/near-signer-ios'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+    # Never cancelled: a publish stopped halfway is worse than waiting for it.
+    concurrency:
+      group: release-plz-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - name: Check the secrets
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          NEARPROTOCOL_CI_PR_ACCESS: ${{ secrets.NEARPROTOCOL_CI_PR_ACCESS }}
+        run: |
+          missing=0
+          for name in CARGO_REGISTRY_TOKEN NEARPROTOCOL_CI_PR_ACCESS; do
+            if [ -z "${!name}" ]; then
+              echo "::error::The $name secret is empty. It is an organization secret: an organization admin must grant this repository access to it."
+              missing=1
+            fi
+          done
+          exit "$missing"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # release-plz reads the whole history for the changelog and pushes the release branch
+          # and tags with this token.
+          fetch-depth: 0
+          token: ${{ secrets.NEARPROTOCOL_CI_PR_ACCESS }}
+      - run: cargo --version
+      - uses: release-plz/action@8b5bf233ecb5779f63508db7cd050e948ee77cc2 # v0.5.144
+        with:
+          manifest_path: host/rust/near-signer-qr/Cargo.toml
+          config: release-plz.toml
+          version: 0.3.174
+        env:
+          GITHUB_TOKEN: ${{ secrets.NEARPROTOCOL_CI_PR_ACCESS }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

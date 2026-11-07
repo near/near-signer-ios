@@ -100,7 +100,8 @@ host/optical/                 camera transfer for computers: codec, terminal CLI
 host/rust/near-signer-qr/     the same for Rust tools (near-cli-rs): crate + `near-signer-qr` binary
 scripts/                      test-all.sh, format.sh, fixture regeneration, app icon generator
                               (NEAR symbol from the near.org site header), token icon renderer
-.github/                      CI and Claude review workflows, Dependabot settings, CODEOWNERS
+.github/                      CI, crate release and Claude review workflows, Dependabot settings,
+                              CODEOWNERS (release-plz.toml configures the crate release)
 ```
 
 ## Protocol
@@ -511,7 +512,7 @@ Chromium with Playwright, reading the codes back from the canvas, letting `near-
 answer as the phone and returning its answer typed, through the camera page (a fake camera stream)
 and as a photo through the file chooser; it needs a browser, so it isn't in CI (how to run it is in
 its `lib.mjs`). `host/rust/near-signer-qr/` is the third implementation, a Rust crate for near-cli-rs and
-other Rust tools, with a `near-signer-qr` binary that takes the same commands and options
+other Rust tools (published on crates.io as `near-signer-qr`), with a `near-signer-qr` binary that takes the same commands and options
 (`cargo run --manifest-path host/rust/near-signer-qr/Cargo.toml -- sign-tx --tx <base64>`); its
 frames are identical to the JavaScript sender's (for uncompressed payloads: the two DEFLATE
 implementations may pack the same bytes differently), and `cargo test` in the crate runs its unit
@@ -670,8 +671,17 @@ GitHub Actions runs on every push to `main` or `master` and on every pull reques
 | Test (macOS) | `scripts/test-all.sh` on macOS 26 (CryptoKit) |
 | Build iOS app | `xcodebuild` for the iOS Simulator (Debug) and for iPhone (Release, unsigned) |
 
-The workflow pins every action to a commit, and Dependabot proposes updates once a release is two
-weeks old. Nothing is signed or published: signing needs the developer's own Apple team.
+The workflows pin every action to a commit, and Dependabot proposes updates once a release is two
+weeks old. The app is neither signed nor published: signing needs the developer's own Apple team.
+
+The Rust crate is released with release-plz (`.github/workflows/release-plz.yml`, settings in
+`release-plz.toml`), as near-cli-rs and the other near crates are. On every push to `main` it
+opens or updates a `chore: release` pull request that bumps the crate's version and writes
+`host/rust/near-signer-qr/CHANGELOG.md` from the conventional commits that touch the crate.
+Merging that pull request publishes the crate to crates.io and tags the commit
+`near-signer-qr-v<version>`; no other push publishes anything. It uses the organization secrets
+`CARGO_REGISTRY_TOKEN` (crates.io, as `nearprotocol-ci`) and `NEARPROTOCOL_CI_PR_ACCESS` (opens
+the pull request so that CI runs on it), and fails with a message naming a missing one.
 
 Claude reviews each pull request when it's opened or marked ready for review, and again when a
 maintainer comments `@claude review` (`.github/workflows/claude-pr-review.yml`, with the
