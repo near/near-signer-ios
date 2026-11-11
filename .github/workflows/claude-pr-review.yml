@@ -76,7 +76,7 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Run Claude Code review
-        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029 # v1.0.239 @ Claude Code 2.1.287 / Agent SDK 0.3.287 (claude-opus-5-5 needs >= 2.1.280)
+        uses: anthropics/claude-code-action@d70510b174a1244958df0b03166a54912811f3e6 # v1.0.239 @ Claude Code 2.1.287 / Agent SDK 0.3.287 (claude-opus-5-5 needs >= 2.1.280)
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API }}
           prompt: ${{ env.REVIEW_PROMPT }}
